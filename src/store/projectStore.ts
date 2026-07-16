@@ -18,6 +18,7 @@ import {
 } from '../lib/systemClipboard'
 import type {
   MediaAsset,
+  ProjectSettings,
   ProjectState,
   Selection,
   TextAlign,
@@ -114,6 +115,7 @@ interface ProjectStore extends ProjectState {
     previewScale: number
   }
   trimClip: (id: string, edge: 'in' | 'out', time: number) => void
+  updateSettings: (patch: Partial<ProjectSettings>) => void
   updateClip: (id: string, patch: Partial<TimelineClip>) => void
   /** Patch every selected clip (or the given ids). */
   updateClips: (ids: string[], patch: Partial<TimelineClip>) => void
@@ -136,7 +138,24 @@ interface ProjectStore extends ProjectState {
   pasteClipboard: () => Promise<void>
   cutSelection: () => Promise<void>
   toggleTrackMute: (trackId: string) => void
+  /** Add a video (above existing video) or audio (below existing audio) track. */
+  addTrack: (kind: 'video' | 'audio') => void
+  /** Move track one row up (toward index 0) or down. */
+  moveTrack: (trackId: string, direction: 'up' | 'down') => void
+  /** Place `trackId` at the index of `targetId` (target shifts toward the gap). */
+  reorderTrack: (trackId: string, targetId: string) => void
   ensureTracks: () => void
+}
+
+function nextTrackName(tracks: Track[], kind: 'video' | 'audio'): string {
+  const prefix = kind === 'video' ? 'V' : 'A'
+  let max = 0
+  for (const t of tracks) {
+    if (t.kind !== kind) continue
+    const m = new RegExp(`^${prefix}(\\d+)$`, 'i').exec(t.name)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `${prefix}${max + 1}`
 }
 
 function defaultTracks(): Track[] {
@@ -741,6 +760,30 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       }),
     ),
 
+  updateSettings: (patch) =>
+    set(
+      produce((s: ProjectStore) => {
+        const nextW = patch.width ?? s.settings.width
+        const nextH = patch.height ?? s.settings.height
+        const nextFps = patch.fps ?? s.settings.fps
+        const width = Math.round(clamp(nextW, 16, 8192) / 2) * 2
+        const height = Math.round(clamp(nextH, 16, 8192) / 2) * 2
+        const fps = Math.round(clamp(nextFps, 1, 240) * 1000) / 1000
+        if (
+          width === s.settings.width &&
+          height === s.settings.height &&
+          fps === s.settings.fps
+        ) {
+          return
+        }
+        pushHistory(s)
+        s.settings.width = width
+        s.settings.height = height
+        s.settings.fps = fps
+        s.sequenceSized = true
+      }),
+    ),
+
   updateClip: (id, patch) =>
     set(
       produce((s: ProjectStore) => {
@@ -1056,6 +1099,65 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       produce((s: ProjectStore) => {
         const track = s.tracks.find((t) => t.id === trackId)
         if (track) track.muted = !track.muted
+      }),
+    ),
+
+  addTrack: (kind) =>
+    set(
+      produce((s: ProjectStore) => {
+        pushHistory(s)
+        const track: Track = {
+          id: uuid(),
+          kind,
+          name: nextTrackName(s.tracks, kind),
+          muted: false,
+          locked: false,
+          height: kind === 'video' ? 56 : 40,
+        }
+        if (kind === 'video') {
+          // New video sits above existing video (earlier in list = higher composite)
+          const firstVideo = s.tracks.findIndex((t) => t.kind === 'video')
+          const firstAudio = s.tracks.findIndex((t) => t.kind === 'audio')
+          const idx =
+            firstVideo >= 0 ? firstVideo : firstAudio >= 0 ? firstAudio : s.tracks.length
+          s.tracks.splice(idx, 0, track)
+        } else {
+          let lastAudio = -1
+          for (let i = 0; i < s.tracks.length; i++) {
+            if (s.tracks[i]?.kind === 'audio') lastAudio = i
+          }
+          if (lastAudio >= 0) s.tracks.splice(lastAudio + 1, 0, track)
+          else s.tracks.push(track)
+        }
+      }),
+    ),
+
+  moveTrack: (trackId, direction) =>
+    set(
+      produce((s: ProjectStore) => {
+        const i = s.tracks.findIndex((t) => t.id === trackId)
+        if (i < 0) return
+        const j = direction === 'up' ? i - 1 : i + 1
+        if (j < 0 || j >= s.tracks.length) return
+        pushHistory(s)
+        const [track] = s.tracks.splice(i, 1)
+        if (!track) return
+        s.tracks.splice(j, 0, track)
+      }),
+    ),
+
+  reorderTrack: (trackId, targetId) =>
+    set(
+      produce((s: ProjectStore) => {
+        if (trackId === targetId) return
+        const from = s.tracks.findIndex((t) => t.id === trackId)
+        const to = s.tracks.findIndex((t) => t.id === targetId)
+        if (from < 0 || to < 0) return
+        pushHistory(s)
+        const [track] = s.tracks.splice(from, 1)
+        if (!track) return
+        const insertAt = s.tracks.findIndex((t) => t.id === targetId)
+        s.tracks.splice(insertAt < 0 ? s.tracks.length : insertAt, 0, track)
       }),
     ),
 }))

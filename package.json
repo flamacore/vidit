@@ -8,14 +8,15 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && electron-builder",
-    "build:dir": "tsc -b && vite build && electron-builder --dir",
+    "build": "tsc -b && vite build && electron-builder --publish never",
+    "build:dir": "tsc -b && vite build && electron-builder --dir --publish never",
     "build:app": "tsc -b && vite build",
     "fixtures": "node scripts/make-fixtures.mjs",
     "postinstall": "node scripts/fix-electron.mjs",
     "test:e2e": "npm run build:app && npm run fixtures && playwright test",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "release:prepare": "node scripts/prepare-release.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -47,6 +48,7 @@
   "build": {
     "appId": "com.vidit.editor",
     "productName": "Vidit",
+    "copyright": "Copyright © Vidit",
     "directories": {
       "output": "release"
     },
@@ -59,11 +61,27 @@
       "**/node_modules/ffmpeg-static/**",
       "**/node_modules/ffprobe-static/**"
     ],
-    "extraResources": [],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
-    }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vidit",
+      "uninstallDisplayName": "Vidit",
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "publish": null
   }
 }

@@ -1,4 +1,9 @@
-import type { ExportCodec, ExportContainer, ExportPlan } from '../../electron/types'
+import type {
+  ExportCodec,
+  ExportContainer,
+  ExportPlan,
+  ExportRateControl,
+} from '../../electron/types'
 import type { MediaAsset, ProjectSettings, TextClip, TimelineClip, Track } from '../types/project'
 import { withTransform } from './elementTransform'
 import { withTextDefaults } from './textStyle'
@@ -13,8 +18,25 @@ export function buildExportPlan(opts: {
   container: ExportContainer
   codec: ExportCodec
   outputPath: string
+  rateControl?: ExportRateControl
+  crf?: number
+  videoBitrateKbps?: number
+  audioBitrateKbps?: number
 }): ExportPlan {
-  const { settings, assets, tracks, clips, textClips, container, codec, outputPath } = opts
+  const {
+    settings,
+    assets,
+    tracks,
+    clips,
+    textClips,
+    container,
+    codec,
+    outputPath,
+    rateControl = 'crf',
+    crf,
+    videoBitrateKbps,
+    audioBitrateKbps = 192,
+  } = opts
   const assetMap = new Map(assets.map((a) => [a.id, a]))
   const trackOrder = tracks.map((t) => t.id)
   const duration = projectDuration(clips, textClips)
@@ -34,6 +56,10 @@ export function buildExportPlan(opts: {
     container: codec === 'prores' ? 'mov' : container,
     codec,
     outputPath,
+    rateControl: codec === 'prores' ? 'crf' : rateControl,
+    crf,
+    videoBitrateKbps,
+    audioBitrateKbps,
     clips: sortedClips.map((c) => {
       const asset = assetMap.get(c.assetId)!
       const tr = withTransform(c)

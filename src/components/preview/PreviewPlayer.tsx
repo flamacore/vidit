@@ -12,6 +12,7 @@ import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
 import type { MediaAsset, TextClip, TimelineClip, Track } from '../../types/project'
 import { AudioOutputSelect, useAudioOutputId } from './AudioOutputSelect'
 import { PreviewLayer } from './PreviewLayer'
+import { SequenceSettingsModal } from './SequenceSettingsModal'
 import { TransformOverlay } from './TransformOverlay'
 
 function layerOpacity(clip: TimelineClip, t: number): number {
@@ -65,6 +66,7 @@ export function PreviewPlayer() {
   const setPreviewScale = useProjectStore((s) => s.setPreviewScale)
   const [scaleDraft, setScaleDraft] = useState(String(previewScale))
   const [status, setStatus] = useState('')
+  const [sequenceOpen, setSequenceOpen] = useState(false)
   const [audioSinkId, setAudioSinkId] = useAudioOutputId()
 
   const rafRef = useRef(0)
@@ -217,7 +219,15 @@ export function PreviewPlayer() {
         </div>
         <div className="preview-meta-row">
           <span className="preview-meta">
-            {settings.width}×{settings.height} · {Number(settings.fps.toFixed(3))} fps
+            <button
+              type="button"
+              className="preview-resolution-btn"
+              title="Edit sequence size"
+              data-testid="sequence-settings-open"
+              onClick={() => setSequenceOpen(true)}
+            >
+              {settings.width}×{settings.height} · {Number(settings.fps.toFixed(3))} fps
+            </button>
             {anyActive ? ` · ${layers.filter((l) => isActiveAt(l.clip, playhead)).length || 1} layer` : ''}
             {layers.some((l) => l.asset.proxyStatus === 'pending')
               ? ' · building preview…'
@@ -294,6 +304,7 @@ export function PreviewPlayer() {
         </div>
         <AudioOutputSelect value={audioSinkId} onChange={setAudioSinkId} />
       </div>
+      <SequenceSettingsModal open={sequenceOpen} onClose={() => setSequenceOpen(false)} />
     </section>
   )
 }

@@ -24,6 +24,8 @@ export interface WaveformResult {
 
 export type ExportContainer = 'mp4' | 'mov'
 export type ExportCodec = 'h264' | 'h265' | 'prores'
+/** CRF = quality target (variable size); bitrate = target Mbps (predictable size) */
+export type ExportRateControl = 'crf' | 'bitrate'
 
 export interface ExportClipPlan {
   id: string
@@ -89,6 +91,14 @@ export interface ExportPlan {
   container: ExportContainer
   codec: ExportCodec
   outputPath: string
+  /** Ignored for ProRes (profile-based). Defaults to CRF. */
+  rateControl?: ExportRateControl
+  /** 0–51; lower = larger/better. Used when rateControl is `crf`. */
+  crf?: number
+  /** Video bitrate in kbps. Used when rateControl is `bitrate`. */
+  videoBitrateKbps?: number
+  /** Audio bitrate in kbps (AAC). Default 192. */
+  audioBitrateKbps?: number
   clips: ExportClipPlan[]
   texts: ExportTextPlan[]
 }
@@ -97,4 +107,6 @@ export interface ExportProgress {
   percent: number
   time: number
   message: string
+  /** Optional JPEG frame from the encode graph (data URL) */
+  previewDataUrl?: string
 }

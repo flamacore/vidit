@@ -1,0 +1,111 @@
+name: Release
+
+# Deliberate releases only — ordinary pushes/PRs do not publish.
+# - Push a v* tag → build installer + GitHub Release
+# - workflow_dispatch → create/push that tag (which then runs the build job)
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # Manual path: stamp a tag on the current default-branch tip, then stop.
+  # The tag push re-enters this workflow and runs `windows`.
+  create-tag:
+    name: Create release tag
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate and push tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in
+            v*) ;;
+            *) echo "Tag must look like v0.1.0 (got: $TAG)" >&2; exit 1 ;;
+          esac
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — push it (or delete it) to rebuild."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+  windows:
+    name: Build Windows installer
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          VER="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync package version from tag
+        shell: bash
+        run: node scripts/sync-version-from-tag.mjs "${{ steps.meta.outputs.version }}"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build installer
+        run: npm run build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Vidit ${{ steps.meta.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            Windows NSIS installer for Vidit.
+
+            This application was built with substantial help from AI coding tools. See the README for details.
+
+            _Auto-generated notes below list commits since the previous tag._
+          files: |
+            release/*-setup.exe
+            release/*-setup.exe.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

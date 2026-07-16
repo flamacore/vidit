@@ -1,7 +1,22 @@
-import { useEffect, useState } from 'react'
-import type { ExportCodec, ExportContainer } from '../../../electron/types'
+import { useEffect, useMemo, useState } from 'react'
+import type { ExportCodec, ExportContainer, ExportRateControl } from '../../../electron/types'
+import {
+  formatExportSizeEstimate,
+  suggestVideoBitrateKbps,
+} from '../../../shared/exportBitrate'
 import { buildExportPlan } from '../../lib/renderPlan'
-import { useProjectStore } from '../../store/projectStore'
+import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
+
+type CrfPreset = 'higher' | 'balanced' | 'smaller'
+
+const CRF_PRESETS: Record<CrfPreset, { h264: number; h265: number; label: string }> = {
+  higher: { h264: 16, h265: 18, label: 'Higher quality' },
+  balanced: { h264: 20, h265: 22, label: 'Balanced' },
+  smaller: { h264: 26, h265: 28, label: 'Smaller file' },
+}
+
+const VIDEO_BITRATE_PRESETS_MBPS = [4, 8, 12, 20, 35, 50] as const
+const AUDIO_BITRATE_PRESETS = [128, 192, 256, 320] as const
 
 export function ExportModal() {
   const open = useProjectStore((s) => s.exportOpen)
@@ -14,16 +29,32 @@ export function ExportModal() {
 
   const [container, setContainer] = useState<ExportContainer>('mp4')
   const [codec, setCodec] = useState<ExportCodec>('h264')
+  const [rateControl, setRateControl] = useState<ExportRateControl>('bitrate')
+  const [crfPreset, setCrfPreset] = useState<CrfPreset>('balanced')
+  const [videoMbps, setVideoMbps] = useState('')
+  const [audioKbps, setAudioKbps] = useState(192)
   const [busy, setBusy] = useState(false)
   const [percent, setPercent] = useState(0)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+
+  const suggestedKbps = useMemo(
+    () => suggestVideoBitrateKbps(settings.width, settings.height, settings.fps),
+    [settings.width, settings.height, settings.fps],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    setVideoMbps((suggestedKbps / 1000).toFixed(suggestedKbps >= 10_000 ? 0 : 1))
+  }, [open, suggestedKbps])
 
   useEffect(() => {
     if (!open || !window.vidit) return
     return window.vidit.onExportProgress((p) => {
       setPercent(p.percent)
       setMessage(p.message)
+      if (p.previewDataUrl) setPreviewUrl(p.previewDataUrl)
     })
   }, [open])
 
@@ -31,7 +62,28 @@ export function ExportModal() {
     if (codec === 'prores') setContainer('mov')
   }, [codec])
 
+  useEffect(() => {
+    if (!open) {
+      setBusy(false)
+      setPercent(0)
+      setMessage('')
+      setError('')
+      setPreviewUrl('')
+    }
+  }, [open])
+
   if (!open) return null
+
+  const duration = getSequenceDuration()
+  const videoKbps = Math.round(Math.max(0.2, Number(videoMbps) || suggestedKbps / 1000) * 1000)
+  const crf =
+    codec === 'h265' ? CRF_PRESETS[crfPreset].h265 : CRF_PRESETS[crfPreset].h264
+  const sizeHint =
+    codec === 'prores'
+      ? 'ProRes size is profile-based (large)'
+      : rateControl === 'bitrate'
+        ? `Est. ${formatExportSizeEstimate(duration, videoKbps, audioKbps)}`
+        : `Est. varies with content · CRF ${crf}`
 
   const onExport = async () => {
     if (!window.vidit) {
@@ -42,9 +94,17 @@ export function ExportModal() {
       setError('Add something to the timeline first.')
       return
     }
+    if (codec !== 'prores' && rateControl === 'bitrate') {
+      const mbps = Number(videoMbps)
+      if (!Number.isFinite(mbps) || mbps < 0.2 || mbps > 200) {
+        setError('Video bitrate must be between 0.2 and 200 Mbps.')
+        return
+      }
+    }
     setError('')
     setBusy(true)
     setPercent(0)
+    setPreviewUrl('')
     setMessage('Choose save location…')
     const ext = codec === 'prores' || container === 'mov' ? 'mov' : 'mp4'
     const out = await window.vidit.showSaveDialog(`vidit-export.${ext}`)
@@ -62,6 +122,10 @@ export function ExportModal() {
         container: codec === 'prores' ? 'mov' : container,
         codec,
         outputPath: out,
+        rateControl: codec === 'prores' ? 'crf' : rateControl,
+        crf,
+        videoBitrateKbps: videoKbps,
+        audioBitrateKbps: audioKbps,
       })
       await window.vidit.exportProject(plan)
       setMessage('Export complete')
@@ -72,6 +136,9 @@ export function ExportModal() {
       setBusy(false)
     }
   }
+
+  const showPreview = busy || percent > 0 || Boolean(previewUrl)
+  const rateControlsDisabled = codec === 'prores' || busy
 
   return (
     <div className="modal-backdrop" data-testid="export-modal" onClick={() => !busy && setExportOpen(false)}>
@@ -108,6 +175,118 @@ export function ExportModal() {
             value={`${settings.width}×${settings.height} @ ${settings.fps}fps`}
           />
         </div>
+
+        {codec === 'prores' ? (
+          <p className="modal-hint" style={{ marginTop: 0 }}>
+            ProRes uses a fixed HQ profile — bitrate controls do not apply.
+          </p>
+        ) : (
+          <>
+            <div className="field">
+              <label>Rate control</label>
+              <select
+                value={rateControl}
+                disabled={rateControlsDisabled}
+                data-testid="export-rate-control"
+                onChange={(e) => setRateControl(e.target.value as ExportRateControl)}
+              >
+                <option value="bitrate">Target bitrate</option>
+                <option value="crf">Quality (CRF)</option>
+              </select>
+            </div>
+
+            {rateControl === 'bitrate' ? (
+              <div className="field">
+                <label htmlFor="export-video-bitrate">Video bitrate (Mbps)</label>
+                <input
+                  id="export-video-bitrate"
+                  type="number"
+                  min={0.2}
+                  max={200}
+                  step={0.5}
+                  value={videoMbps}
+                  disabled={busy}
+                  data-testid="export-video-bitrate"
+                  onChange={(e) => setVideoMbps(e.target.value)}
+                />
+                <div className="row" style={{ marginTop: 6 }}>
+                  {VIDEO_BITRATE_PRESETS_MBPS.map((mbps) => (
+                    <button
+                      key={mbps}
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={() => setVideoMbps(String(mbps))}
+                    >
+                      {mbps}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy}
+                    title="Suggested for this sequence size"
+                    onClick={() =>
+                      setVideoMbps((suggestedKbps / 1000).toFixed(suggestedKbps >= 10_000 ? 0 : 1))
+                    }
+                  >
+                    Auto
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="field">
+                <label>Quality</label>
+                <select
+                  value={crfPreset}
+                  disabled={busy}
+                  data-testid="export-crf-preset"
+                  onChange={(e) => setCrfPreset(e.target.value as CrfPreset)}
+                >
+                  {(Object.keys(CRF_PRESETS) as CrfPreset[]).map((key) => (
+                    <option key={key} value={key}>
+                      {CRF_PRESETS[key].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="field">
+              <label>Audio bitrate</label>
+              <select
+                value={audioKbps}
+                disabled={busy}
+                data-testid="export-audio-bitrate"
+                onChange={(e) => setAudioKbps(Number(e.target.value))}
+              >
+                {AUDIO_BITRATE_PRESETS.map((kbps) => (
+                  <option key={kbps} value={kbps}>
+                    {kbps} kbps
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <p className="export-size-hint" data-testid="export-size-hint">
+              {sizeHint}
+            </p>
+          </>
+        )}
+
+        {showPreview ? (
+          <div
+            className="export-preview"
+            data-testid="export-preview"
+            style={{ aspectRatio: `${settings.width} / ${settings.height}` }}
+          >
+            {previewUrl ? (
+              <img src={previewUrl} alt="Encoding preview" />
+            ) : (
+              <span className="export-preview-placeholder">Waiting for frames…</span>
+            )}
+          </div>
+        ) : null}
         {message ? <p style={{ color: 'var(--text-muted)', margin: '8px 0 0' }}>{message}</p> : null}
         {busy || percent > 0 ? (
           <div className="progress-bar">

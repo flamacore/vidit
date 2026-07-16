@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { suggestVideoBitrateKbps } from '../shared/exportBitrate'
 import type {
   ExportPlan,
   ExportProgress,
@@ -269,7 +270,7 @@ function ffmpegDrawColor(color: string, alpha = 1): string {
   return `0x${hex.toUpperCase()}@${a.toFixed(3)}`
 }
 
-function buildExportArgs(plan: ExportPlan): string[] {
+function buildExportArgs(plan: ExportPlan, previewPath: string): string[] {
   const args: string[] = ['-y']
   const videoClips = plan.clips.filter((c) => c.hasVideo)
   const audioClips = plan.clips.filter((c) => c.hasAudio)
@@ -440,30 +441,47 @@ function buildExportArgs(plan: ExportPlan): string[] {
     aMap = '[aout]'
   }
 
+  // Low-res side branch for the export dialog preview (does not affect the file)
+  filterParts.push(`[${vOut}]split=2[venc][vprevsrc]`)
+  filterParts.push(`[vprevsrc]fps=2,scale=480:-2:flags=fast_bilinear,format=yuvj420p[vprev]`)
+
   args.push('-filter_complex', filterParts.join(';'))
-  args.push('-map', `[${vOut}]`, '-map', aMap)
+  args.push('-map', '[venc]', '-map', aMap)
   args.push('-t', String(plan.duration))
 
-  if (plan.codec === 'h264') {
-    args.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p')
-  } else if (plan.codec === 'h265') {
-    args.push(
-      '-c:v',
-      'libx265',
-      '-preset',
-      'medium',
-      '-crf',
-      '20',
-      '-pix_fmt',
-      'yuv420p',
-      '-tag:v',
-      'hvc1',
-    )
+  const rateControl = plan.rateControl === 'bitrate' ? 'bitrate' : 'crf'
+  const audioKbps = Math.round(
+    Math.min(512, Math.max(64, plan.audioBitrateKbps ?? 192)),
+  )
+
+  if (plan.codec === 'h264' || plan.codec === 'h265') {
+    const encoder = plan.codec === 'h264' ? 'libx264' : 'libx265'
+    const defaultCrf = plan.codec === 'h264' ? 18 : 20
+    args.push('-c:v', encoder, '-preset', 'medium')
+    if (rateControl === 'bitrate') {
+      const kbps = Math.round(
+        Math.min(
+          200_000,
+          Math.max(
+            200,
+            plan.videoBitrateKbps ??
+              suggestVideoBitrateKbps(plan.width, plan.height, plan.fps),
+          ),
+        ),
+      )
+      // 2-pass-ish VBV: target + ~2× maxrate keeps size predictable without full 2-pass
+      args.push('-b:v', `${kbps}k`, '-maxrate', `${Math.round(kbps * 1.5)}k`, '-bufsize', `${kbps * 2}k`)
+    } else {
+      const crf = Math.round(Math.min(40, Math.max(10, plan.crf ?? defaultCrf)))
+      args.push('-crf', String(crf))
+    }
+    args.push('-pix_fmt', 'yuv420p')
+    if (plan.codec === 'h265') args.push('-tag:v', 'hvc1')
   } else {
     args.push('-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le')
   }
 
-  args.push('-c:a', 'aac', '-b:a', '192k')
+  args.push('-c:a', 'aac', '-b:a', `${audioKbps}k`)
 
   if (plan.container === 'mov' || plan.codec === 'prores') {
     args.push('-f', 'mov')
@@ -472,7 +490,32 @@ function buildExportArgs(plan: ExportPlan): string[] {
   }
 
   args.push(plan.outputPath)
+
+  // Overwrite a single JPEG as frames encode (~2 fps)
+  args.push(
+    '-map',
+    '[vprev]',
+    '-update',
+    '1',
+    '-q:v',
+    '5',
+    '-f',
+    'image2',
+    previewPath.replace(/\\/g, '/'),
+  )
   return args
+}
+
+function readPreviewDataUrl(previewPath: string): string | undefined {
+  try {
+    if (!fs.existsSync(previewPath)) return undefined
+    const buf = fs.readFileSync(previewPath)
+    if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return undefined
+    if (buf[buf.length - 2] !== 0xff || buf[buf.length - 1] !== 0xd9) return undefined
+    return `data:image/jpeg;base64,${buf.toString('base64')}`
+  } catch {
+    return undefined
+  }
 }
 
 export async function exportProject(
@@ -483,13 +526,38 @@ export async function exportProject(
     plan.outputPath = plan.outputPath.replace(/\.[^.]+$/i, '.mov')
   }
 
-  const args = buildExportArgs(plan)
+  const previewPath = path.join(
+    os.tmpdir(),
+    `vidit-export-preview-${process.pid}-${Date.now()}.jpg`,
+  )
+  try {
+    if (fs.existsSync(previewPath)) fs.unlinkSync(previewPath)
+  } catch {
+    /* ignore */
+  }
+
+  const args = buildExportArgs(plan, previewPath)
   onProgress({ percent: 0, time: 0, message: 'Starting export…' })
+
+  let lastPreviewAt = 0
+  let lastPreviewUrl: string | undefined
+
+  const emit = (partial: Omit<ExportProgress, 'previewDataUrl'> & { previewDataUrl?: string }) => {
+    const now = Date.now()
+    if (now - lastPreviewAt >= 280) {
+      const url = readPreviewDataUrl(previewPath)
+      if (url) {
+        lastPreviewUrl = url
+        lastPreviewAt = now
+      }
+    }
+    onProgress({ ...partial, previewDataUrl: lastPreviewUrl })
+  }
 
   const { code, stderr } = await run(ffmpegPath, args, (chunk) => {
     const t = parseTime(chunk)
     if (t != null && plan.duration > 0) {
-      onProgress({
+      emit({
         percent: Math.min(99, (t / plan.duration) * 100),
         time: t,
         message: `Encoding ${t.toFixed(1)}s / ${plan.duration.toFixed(1)}s`,
@@ -497,10 +565,21 @@ export async function exportProject(
     }
   })
 
+  try {
+    if (fs.existsSync(previewPath)) fs.unlinkSync(previewPath)
+  } catch {
+    /* ignore */
+  }
+
   if (code !== 0) {
     throw new Error(`FFmpeg export failed:\n${stderr.slice(-2000)}`)
   }
-  onProgress({ percent: 100, time: plan.duration, message: 'Export complete' })
+  onProgress({
+    percent: 100,
+    time: plan.duration,
+    message: 'Export complete',
+    previewDataUrl: lastPreviewUrl,
+  })
 }
 
 export { ffmpegPath, ffprobePath }

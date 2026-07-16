@@ -1,8 +1,12 @@
 import {
+  ChevronDown,
+  ChevronUp,
+  Film,
   Magnet,
   Maximize2,
   Scissors,
   MousePointer2,
+  AudioLines,
   ZoomIn,
   ZoomOut,
   VolumeX,
@@ -12,6 +16,9 @@ import { useEffect, useMemo, useRef, type DragEvent, type PointerEvent, type Whe
 import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
 import { clamp, formatTimecode, pxToTime, timeToPx } from '../../lib/timelineMath'
 import { ClipBlock, TextBlock } from './ClipBlock'
+
+/** Must match `--track-label-w` in editor.css */
+const TRACK_LABEL_W = 120
 
 /** Isolated so clip rows don't re-render at playback tick rate */
 function TimelinePlayhead({
@@ -30,7 +37,7 @@ function TimelinePlayhead({
     <div
       className="playhead"
       data-testid="playhead"
-      style={{ left: timeToPx(playhead, zoom) }}
+      style={{ left: TRACK_LABEL_W + timeToPx(playhead, zoom) }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -57,14 +64,19 @@ export function Timeline() {
   const setTool = useProjectStore((s) => s.setTool)
   const addClipsFromAssets = useProjectStore((s) => s.addClipsFromAssets)
   const toggleTrackMute = useProjectStore((s) => s.toggleTrackMute)
+  const addTrack = useProjectStore((s) => s.addTrack)
+  const moveTrack = useProjectStore((s) => s.moveTrack)
+  const reorderTrack = useProjectStore((s) => s.reorderTrack)
   const clearTimelineSelection = useProjectStore((s) => s.clearTimelineSelection)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
   const panning = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const dragTrackId = useRef<string | null>(null)
 
   const duration = Math.max(getSequenceDuration(), 12)
-  const width = timeToPx(duration + 4, zoom)
+  const laneWidth = timeToPx(duration + 4, zoom)
+  const canvasWidth = TRACK_LABEL_W + laneWidth
   const assetMap = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets])
 
   const ticks = useMemo(() => {
@@ -78,7 +90,7 @@ export function Timeline() {
     const el = scrollRef.current
     if (!el) return 0
     const rect = el.getBoundingClientRect()
-    const x = clientX - rect.left + el.scrollLeft
+    const x = clientX - rect.left + el.scrollLeft - TRACK_LABEL_W
     return Math.max(0, pxToTime(x, zoom))
   }
 
@@ -101,8 +113,13 @@ export function Timeline() {
     scrubbing.current = false
   }
 
+  const hasTrackDrag = (e: DragEvent) =>
+    Array.from(e.dataTransfer.types).includes('application/vidit-track') ||
+    Boolean(dragTrackId.current)
+
   const onLaneDrop = (e: DragEvent, trackId: string) => {
     e.preventDefault()
+    if (hasTrackDrag(e)) return
     let ids: string[] = []
     const multi = e.dataTransfer.getData('application/vidit-assets')
     if (multi) {
@@ -127,16 +144,15 @@ export function Timeline() {
     const el = scrollRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    const cursorX = e.clientX - rect.left + el.scrollLeft
+    const cursorX = e.clientX - rect.left + el.scrollLeft - TRACK_LABEL_W
     const timeAtCursor = pxToTime(cursorX, zoom)
     const factor = e.deltaY > 0 ? 1 / 1.15 : 1.15
     const nextZoom = clamp(zoom * factor, 0.15, 8)
     setZoom(nextZoom)
-    // Keep time under cursor stable after zoom
     requestAnimationFrame(() => {
       const sc = scrollRef.current
       if (!sc) return
-      const newX = timeToPx(timeAtCursor, nextZoom)
+      const newX = TRACK_LABEL_W + timeToPx(timeAtCursor, nextZoom)
       sc.scrollLeft = Math.max(0, newX - (e.clientX - rect.left))
     })
   }
@@ -211,6 +227,24 @@ export function Timeline() {
         >
           <Magnet size={15} />
         </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          title="Add video track"
+          data-testid="add-video-track"
+          onClick={() => addTrack('video')}
+        >
+          <Film size={15} />
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          title="Add audio track"
+          data-testid="add-audio-track"
+          onClick={() => addTrack('audio')}
+        >
+          <AudioLines size={15} />
+        </button>
         <span className="timeline-hint">
           Ctrl+wheel zoom · Alt/middle-drag pan · Ctrl/Shift multi-select
         </span>
@@ -228,7 +262,8 @@ export function Timeline() {
           onClick={() => {
             const el = scrollRef.current
             if (!el) return
-            const fit = el.clientWidth / (80 * Math.max(duration, 1))
+            const usable = Math.max(80, el.clientWidth - TRACK_LABEL_W)
+            const fit = usable / (80 * Math.max(duration, 1))
             setZoom(fit)
             el.scrollLeft = 0
           }}
@@ -236,72 +271,118 @@ export function Timeline() {
           <Maximize2 size={15} />
         </button>
       </div>
-      <div className="timeline-body">
-        <div className="track-labels">
-          <div className="track-label" style={{ height: 24 }} />
-          {tracks.map((track) => (
-            <div key={track.id} className="track-label" style={{ height: track.height }}>
-              <span>{track.name}</span>
-              {track.kind !== 'text' ? (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  title="Mute"
-                  onClick={() => toggleTrackMute(track.id)}
-                >
-                  {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-        <div
-          className="tracks-scroll"
-          ref={scrollRef}
-          onWheel={onWheel}
-          onPointerDown={onPanPointerDown}
-          onPointerMove={(e) => {
-            onPanPointerMove(e)
-            onScrubMove(e)
-          }}
-          onPointerUp={() => {
-            endPan()
-            endScrub()
-          }}
-          onPointerCancel={() => {
-            endPan()
-            endScrub()
-          }}
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest('.clip')) return
-          }}
-        >
-          <div style={{ width, position: 'relative', minHeight: '100%' }}>
-            <div
-              className="ruler"
-              style={{ width }}
-              data-testid="timeline-ruler"
-              onPointerDown={(e) => {
-                if (e.altKey || e.button === 1) return
-                clearTimelineSelection()
-                startScrub(e)
-              }}
-              onPointerMove={onScrubMove}
-              onPointerUp={endScrub}
-            >
-              {ticks.map((t) => (
-                <div key={t} className="ruler-tick" style={{ left: timeToPx(t, zoom) }}>
-                  {formatTimecode(t)}
-                </div>
-              ))}
-            </div>
-            {tracks.map((track) => (
+      <div
+        className="tracks-scroll"
+        ref={scrollRef}
+        data-testid="timeline-scroll"
+        onWheel={onWheel}
+        onPointerDown={onPanPointerDown}
+        onPointerMove={(e) => {
+          onPanPointerMove(e)
+          onScrubMove(e)
+        }}
+        onPointerUp={() => {
+          endPan()
+          endScrub()
+        }}
+        onPointerCancel={() => {
+          endPan()
+          endScrub()
+        }}
+      >
+        <div className="timeline-canvas" style={{ width: canvasWidth }}>
+          <div className="timeline-corner" />
+          <div
+            className="ruler"
+            style={{ width: laneWidth }}
+            data-testid="timeline-ruler"
+            onPointerDown={(e) => {
+              if (e.altKey || e.button === 1) return
+              clearTimelineSelection()
+              startScrub(e)
+            }}
+            onPointerMove={onScrubMove}
+            onPointerUp={endScrub}
+          >
+            {ticks.map((t) => (
+              <div key={t} className="ruler-tick" style={{ left: timeToPx(t, zoom) }}>
+                {formatTimecode(t)}
+              </div>
+            ))}
+          </div>
+
+          {tracks.map((track, index) => (
+            <div key={track.id} className="timeline-row">
               <div
-                key={track.id}
+                className="track-label"
+                style={{ height: track.height }}
+                draggable
+                data-testid={`track-label-${track.id}`}
+                onDragStart={(e) => {
+                  dragTrackId.current = track.id
+                  e.dataTransfer.setData('application/vidit-track', track.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragEnd={() => {
+                  dragTrackId.current = null
+                }}
+                onDragOver={(e) => {
+                  if (!hasTrackDrag(e)) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const from =
+                    e.dataTransfer.getData('application/vidit-track') || dragTrackId.current
+                  if (from) reorderTrack(from, track.id)
+                  dragTrackId.current = null
+                }}
+              >
+                <span className="track-label-name" title="Drag to reorder">
+                  {track.name}
+                </span>
+                <div className="track-label-actions">
+                  <button
+                    type="button"
+                    className="btn-ghost track-move-btn"
+                    title="Move track up"
+                    disabled={index === 0}
+                    data-testid={`track-up-${track.id}`}
+                    onClick={() => moveTrack(track.id, 'up')}
+                  >
+                    <ChevronUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost track-move-btn"
+                    title="Move track down"
+                    disabled={index === tracks.length - 1}
+                    data-testid={`track-down-${track.id}`}
+                    onClick={() => moveTrack(track.id, 'down')}
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                  {track.kind !== 'text' ? (
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      title="Mute"
+                      onClick={() => toggleTrackMute(track.id)}
+                    >
+                      {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div
                 className="track-lane"
                 data-track-id={track.id}
-                style={{ height: track.height, width }}
-                onDragOver={(e) => e.preventDefault()}
+                style={{ width: laneWidth, height: track.height }}
+                onDragOver={(e) => {
+                  if (hasTrackDrag(e)) return
+                  e.preventDefault()
+                }}
                 onDrop={(e) => onLaneDrop(e, track.id)}
                 onPointerDown={(e) => {
                   if ((e.target as HTMLElement).closest('.clip')) return
@@ -334,17 +415,18 @@ export function Timeline() {
                         />
                       ))}
               </div>
-            ))}
-            <TimelinePlayhead
-              zoom={zoom}
-              onPointerDown={(e) => {
-                e.stopPropagation()
-                startScrub(e)
-              }}
-              onPointerMove={onScrubMove}
-              onPointerUp={endScrub}
-            />
-          </div>
+            </div>
+          ))}
+
+          <TimelinePlayhead
+            zoom={zoom}
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              startScrub(e)
+            }}
+            onPointerMove={onScrubMove}
+            onPointerUp={endScrub}
+          />
         </div>
       </div>
     </section>

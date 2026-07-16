@@ -18,6 +18,9 @@ playwright-report
 *.local
 .env
 .env.*
+vidit-export.*
+*.exe
+*.blockmap
 
 # Editor directories and files
 .vscode/*

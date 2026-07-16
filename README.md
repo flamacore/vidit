@@ -41,8 +41,34 @@ Playwright drives the Electron app (import, timeline, preview, export smoke cove
 
 ```bash
 npm run build:dir   # unpackaged app under release/
-npm run build       # full installer
+npm run build       # Windows NSIS installer under release/
 ```
+
+Installer artifact: `release/Vidit-<version>-setup.exe` (unsigned — SmartScreen may warn).
+
+## Releases
+
+Releases are **deliberate**, not automatic on every push (same idea as a tag-gated pipeline).
+
+1. When you want a release, bump and review notes locally:
+
+   ```bash
+   npm run release:prepare -- 0.2.0
+   ```
+
+2. Commit any pending work (including the version bump), then tag and push **only the tag** to publish:
+
+   ```bash
+   git tag -a v0.2.0 -m "Vidit v0.2.0"
+   git push origin HEAD
+   git push origin v0.2.0
+   ```
+
+3. GitHub Actions (`.github/workflows/release.yml`) builds the NSIS installer and creates a GitHub Release. Notes are auto-generated from commits since the previous `v*` tag, so one release collects everything since the last version.
+
+Or run **Actions → Release → Run workflow** and pass a tag such as `v0.2.0` (that only creates/pushes the tag; the installer build runs from the tag push).
+
+Ordinary pushes to `main` do **not** create releases.
 
 ## Stack
 
