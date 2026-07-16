@@ -1,6 +1,8 @@
+
 # Vidit
 
 Desktop non-linear video editor for Windows, built with **Electron**, **React**, **Vite**, **Zustand**, and native **FFmpeg**.
+<img width="1070" height="699" alt="electron_jv6IAOPSAr" src="https://github.com/user-attachments/assets/8616a985-d04a-4de9-b322-006948ce61cf" />
 
 ## AI-assisted development
 
