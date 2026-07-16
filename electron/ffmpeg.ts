@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { getBlendMode } from '../shared/blendModes'
 import { suggestVideoBitrateKbps } from '../shared/exportBitrate'
 import type {
   ExportPlan,
@@ -335,15 +336,29 @@ function buildExportArgs(plan: ExportPlan, previewPath: string): string[] {
       clip.transitionIn > 0 ? `:alpha=premultiplied` : ''
     const fadeFilter =
       clip.transitionIn > 0 ? `,fade=t=in:st=${clip.start}:d=${clip.transitionIn}:alpha=1` : ''
+    const topLabel = fadeFilter ? `${label}f` : label
     if (fadeFilter) {
       filterParts.push(`[${label}]format=rgba${fadeFilter}[${label}f]`)
+    }
+    const blend = getBlendMode(clip.blendMode)
+    if (blend.ffmpeg === 'normal') {
       filterParts.push(
-        `[${current}][${label}f]overlay=x='${ox}':y='${oy}':eof_action=pass${fade}[${out}]`,
+        `[${current}][${topLabel}]overlay=x='${ox}':y='${oy}':eof_action=pass${fade}[${out}]`,
       )
     } else {
+      // Full-frame place, then blend in RGB so modes like multiply aren't green-tinted
       filterParts.push(
-        `[${current}][${label}]overlay=x='${ox}':y='${oy}':eof_action=pass${fade}[${out}]`,
+        `color=c=0x00000000:s=${plan.width}x${plan.height}:d=${Math.max(plan.duration, 0.1)}:r=${plan.fps},format=rgba[${label}pad]`,
       )
+      filterParts.push(
+        `[${label}pad][${topLabel}]overlay=x='${ox}':y='${oy}':eof_action=pass:format=auto[${label}placed]`,
+      )
+      filterParts.push(`[${current}]format=gbrap[${current}rgb]`)
+      filterParts.push(`[${label}placed]format=gbrap[${label}rgb]`)
+      filterParts.push(
+        `[${current}rgb][${label}rgb]blend=all_mode=${blend.ffmpeg}:all_opacity=1[${out}pre]`,
+      )
+      filterParts.push(`[${out}pre]format=rgba[${out}]`)
     }
     current = out
   })

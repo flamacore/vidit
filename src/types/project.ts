@@ -1,3 +1,6 @@
+import type { BlendModeId } from '../../shared/blendModes'
+
+export type { BlendModeId }
 export type TrackKind = 'video' | 'audio' | 'text'
 
 export interface MediaAsset {
@@ -26,6 +29,8 @@ export interface Track {
   muted: boolean
   locked: boolean
   height: number
+  /** Photoshop-style blend with layers below (video/text tracks). */
+  blendMode: BlendModeId
 }
 
 export interface TimelineClip {

@@ -89,6 +89,7 @@ export function buildExportPlan(opts: {
         cropR: tr.cropR,
         cropT: tr.cropT,
         cropB: tr.cropB,
+        blendMode: tracks.find((tr) => tr.id === c.trackId)?.blendMode ?? 'normal',
       }
     }),
     texts: textClips.map((raw) => {
@@ -119,6 +120,7 @@ export function buildExportPlan(opts: {
         shadowOffsetY: t.shadowOffsetY,
         bevelEnabled: t.bevelEnabled,
         bevelDepth: t.bevelDepth,
+        blendMode: tracks.find((tr) => tr.id === t.trackId)?.blendMode ?? 'normal',
       }
     }),
   }

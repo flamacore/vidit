@@ -1,5 +1,6 @@
 import { Pause, Play, SkipBack, SkipForward } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { getBlendMode } from '../../../shared/blendModes'
 import { ensureAssetProxies } from '../../lib/importMedia'
 import { transformStyle, withTransform } from '../../lib/elementTransform'
 import { formatTimecode } from '../../lib/timelineMath'
@@ -158,6 +159,9 @@ export function PreviewPlayer() {
             <div className="preview-layers" data-testid="preview-layers">
               {layers.map((layer) => {
                 const active = isActiveAt(layer.clip, playhead)
+                const blend = getBlendMode(
+                  tracks.find((t) => t.id === layer.clip.trackId)?.blendMode,
+                )
                 return (
                   <PreviewLayer
                     key={layer.clip.id}
@@ -168,6 +172,7 @@ export function PreviewPlayer() {
                     active={active}
                     zIndex={10 + layer.z}
                     opacity={active ? layerOpacity(layer.clip, playhead) : 0}
+                    mixBlendMode={blend.css}
                     playAudio={layer.clip.id === audioClipId}
                     audioSinkId={audioSinkId}
                     onStatus={active ? setStatus : undefined}
@@ -178,8 +183,16 @@ export function PreviewPlayer() {
             {texts.map((raw) => {
               const text = withTextDefaults(raw)
               const xform = transformStyle(withTransform(text))
+              const blend = getBlendMode(tracks.find((t) => t.id === text.trackId)?.blendMode)
               return (
-                <div key={text.id} className="preview-text-layer" style={{ zIndex: 80 }}>
+                <div
+                  key={text.id}
+                  className="preview-text-layer"
+                  style={{
+                    zIndex: 80,
+                    mixBlendMode: blend.css as CSSProperties['mixBlendMode'],
+                  }}
+                >
                   <div
                     className="preview-layer-xform"
                     style={{ left: xform.left, top: xform.top, transform: xform.transform }}

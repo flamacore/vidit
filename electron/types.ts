@@ -53,6 +53,8 @@ export interface ExportClipPlan {
   cropR: number
   cropT: number
   cropB: number
+  /** Track blend mode id (Photoshop-style) */
+  blendMode?: string
 }
 
 export interface ExportTextPlan {
@@ -81,6 +83,7 @@ export interface ExportTextPlan {
   shadowOffsetY: number
   bevelEnabled: boolean
   bevelDepth: number
+  blendMode?: string
 }
 
 export interface ExportPlan {

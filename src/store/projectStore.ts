@@ -16,6 +16,11 @@ import {
   writeSystemClipboardLayers,
   type ViditClipboardPayload,
 } from '../lib/systemClipboard'
+import {
+  DEFAULT_BLEND_MODE,
+  getBlendMode,
+  type BlendModeId,
+} from '../../shared/blendModes'
 import type {
   MediaAsset,
   ProjectSettings,
@@ -138,6 +143,7 @@ interface ProjectStore extends ProjectState {
   pasteClipboard: () => Promise<void>
   cutSelection: () => Promise<void>
   toggleTrackMute: (trackId: string) => void
+  setTrackBlendMode: (trackId: string, blendMode: BlendModeId) => void
   /** Add a video (above existing video) or audio (below existing audio) track. */
   addTrack: (kind: 'video' | 'audio') => void
   /** Move track one row up (toward index 0) or down. */
@@ -158,12 +164,58 @@ function nextTrackName(tracks: Track[], kind: 'video' | 'audio'): string {
   return `${prefix}${max + 1}`
 }
 
+function normalizeTrack(t: Partial<Track> & Pick<Track, 'id' | 'kind' | 'name'>): Track {
+  const kind = t.kind
+  const minH = kind === 'video' ? 72 : kind === 'text' ? 58 : 40
+  return {
+    id: t.id,
+    kind,
+    name: t.name,
+    muted: Boolean(t.muted),
+    locked: Boolean(t.locked),
+    height: Math.max(t.height ?? minH, minH),
+    blendMode: getBlendMode(t.blendMode).id,
+  }
+}
+
 function defaultTracks(): Track[] {
   return [
-    { id: 'text-1', kind: 'text', name: 'Text', muted: false, locked: false, height: 40 },
-    { id: 'v2', kind: 'video', name: 'V2', muted: false, locked: false, height: 56 },
-    { id: 'v1', kind: 'video', name: 'V1', muted: false, locked: false, height: 56 },
-    { id: 'a1', kind: 'audio', name: 'A1', muted: false, locked: false, height: 40 },
+    {
+      id: 'text-1',
+      kind: 'text',
+      name: 'Text',
+      muted: false,
+      locked: false,
+      height: 58,
+      blendMode: DEFAULT_BLEND_MODE,
+    },
+    {
+      id: 'v2',
+      kind: 'video',
+      name: 'V2',
+      muted: false,
+      locked: false,
+      height: 72,
+      blendMode: DEFAULT_BLEND_MODE,
+    },
+    {
+      id: 'v1',
+      kind: 'video',
+      name: 'V1',
+      muted: false,
+      locked: false,
+      height: 72,
+      blendMode: DEFAULT_BLEND_MODE,
+    },
+    {
+      id: 'a1',
+      kind: 'audio',
+      name: 'A1',
+      muted: false,
+      locked: false,
+      height: 40,
+      blendMode: DEFAULT_BLEND_MODE,
+    },
   ]
 }
 
@@ -682,7 +734,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       settings: data.settings,
       sequenceSized: data.sequenceSized,
       assets: data.assets,
-      tracks: data.tracks,
+      tracks: data.tracks.map((t) => normalizeTrack(t as Track)),
       clips: data.clips.map(normalizeClip),
       textClips: data.textClips.map(normalizeText),
       playhead: data.playhead,
@@ -1102,6 +1154,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       }),
     ),
 
+  setTrackBlendMode: (trackId, blendMode) =>
+    set(
+      produce((s: ProjectStore) => {
+        const track = s.tracks.find((t) => t.id === trackId)
+        if (!track || track.kind === 'audio') return
+        const next = getBlendMode(blendMode).id
+        if (track.blendMode === next) return
+        pushHistory(s)
+        track.blendMode = next
+      }),
+    ),
+
   addTrack: (kind) =>
     set(
       produce((s: ProjectStore) => {
@@ -1112,7 +1176,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           name: nextTrackName(s.tracks, kind),
           muted: false,
           locked: false,
-          height: kind === 'video' ? 56 : 40,
+          height: kind === 'video' ? 72 : 40,
+          blendMode: DEFAULT_BLEND_MODE,
         }
         if (kind === 'video') {
           // New video sits above existing video (earlier in list = higher composite)

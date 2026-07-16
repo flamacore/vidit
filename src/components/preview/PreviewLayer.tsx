@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { transformStyle, withTransform } from '../../lib/elementTransform'
 import { getPreviewBlobUrl, peekPreviewBlobUrl } from '../../lib/previewBlobCache'
 import type { MediaAsset, TimelineClip } from '../../types/project'
@@ -19,6 +19,8 @@ interface Props {
   zIndex: number
   /** Transition / visibility opacity (0–1), multiplied with clip.opacity */
   opacity: number
+  /** CSS mix-blend-mode (from track blend setting) */
+  mixBlendMode?: string
   /** When true, this layer is the preview audio source */
   playAudio?: boolean
   audioSinkId?: string
@@ -37,6 +39,7 @@ export function PreviewLayer({
   active,
   zIndex,
   opacity,
+  mixBlendMode = 'normal',
   playAudio = false,
   audioSinkId = '',
   onStatus,
@@ -258,10 +261,16 @@ export function PreviewLayer({
     }
   }, [playAudio, active, clip.volume, audioSinkId, src])
 
+  const slotStyle: CSSProperties = {
+    zIndex,
+    opacity: vis,
+    mixBlendMode: mixBlendMode as CSSProperties['mixBlendMode'],
+  }
+
   if (asset.kind === 'image') {
     const imageSrc = window.vidit?.toMediaUrl(asset.path) ?? ''
     return (
-      <div className="preview-layer-slot" style={{ zIndex, opacity: vis }}>
+      <div className="preview-layer-slot" style={slotStyle}>
         <div className="preview-layer-xform" style={{ left: xform.left, top: xform.top, transform: xform.transform }}>
           <img
             src={imageSrc}
@@ -277,7 +286,7 @@ export function PreviewLayer({
   }
 
   return (
-    <div className="preview-layer-slot" style={{ zIndex: zIndex + 1, opacity: vis }}>
+    <div className="preview-layer-slot" style={{ ...slotStyle, zIndex: zIndex + 1 }}>
       {asset.thumbnail && (waitingProxy || !src) ? (
         <div className="preview-layer-xform" style={{ left: xform.left, top: xform.top, transform: xform.transform }}>
           <img

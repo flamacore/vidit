@@ -1,8 +1,9 @@
+import { getBlendMode } from '../../shared/blendModes'
 import { ensureAssetProxies } from './importMedia'
 import { DEFAULT_TRANSFORM } from './elementTransform'
 import { DEFAULT_TEXT_STYLE } from './textStyle'
 import { useProjectStore } from '../store/projectStore'
-import type { MediaAsset } from '../types/project'
+import type { MediaAsset, Track } from '../types/project'
 
 export async function saveCurrentProject(): Promise<boolean> {
   if (!window.vidit) throw new Error('Desktop bridge missing')
@@ -54,7 +55,16 @@ export async function openProjectFile(): Promise<boolean> {
     settings: data.settings,
     sequenceSized: data.sequenceSized,
     assets: enriched,
-    tracks: data.tracks,
+    tracks: data.tracks.map(
+      (t): Track => ({
+        ...t,
+        blendMode: getBlendMode(t.blendMode).id,
+        height: Math.max(
+          t.height ?? 40,
+          t.kind === 'video' ? 72 : t.kind === 'text' ? 58 : 40,
+        ),
+      }),
+    ),
     clips: data.clips.map((c) => ({ ...DEFAULT_TRANSFORM, ...c })),
     textClips: data.textClips.map((t) => ({
       ...DEFAULT_TEXT_STYLE,

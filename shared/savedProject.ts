@@ -26,6 +26,7 @@ export interface SavedProject {
     muted: boolean
     locked: boolean
     height: number
+    blendMode?: string
   }>
   clips: Array<{
     id: string

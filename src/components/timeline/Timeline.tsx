@@ -13,12 +13,20 @@ import {
   Volume2,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, type DragEvent, type PointerEvent, type WheelEvent } from 'react'
+import {
+  blendModeGroups,
+  getBlendMode,
+  isBlendModeId,
+  type BlendModeId,
+} from '../../../shared/blendModes'
 import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
 import { clamp, formatTimecode, pxToTime, timeToPx } from '../../lib/timelineMath'
 import { ClipBlock, TextBlock } from './ClipBlock'
 
-/** Must match `--track-label-w` in editor.css */
-const TRACK_LABEL_W = 120
+const BLEND_GROUPS = blendModeGroups()
+
+/** Must match `--track-label-w` in tokens.css */
+const TRACK_LABEL_W = 132
 
 /** Isolated so clip rows don't re-render at playback tick rate */
 function TimelinePlayhead({
@@ -64,6 +72,7 @@ export function Timeline() {
   const setTool = useProjectStore((s) => s.setTool)
   const addClipsFromAssets = useProjectStore((s) => s.addClipsFromAssets)
   const toggleTrackMute = useProjectStore((s) => s.toggleTrackMute)
+  const setTrackBlendMode = useProjectStore((s) => s.setTrackBlendMode)
   const addTrack = useProjectStore((s) => s.addTrack)
   const moveTrack = useProjectStore((s) => s.moveTrack)
   const reorderTrack = useProjectStore((s) => s.reorderTrack)
@@ -339,41 +348,70 @@ export function Timeline() {
                   dragTrackId.current = null
                 }}
               >
-                <span className="track-label-name" title="Drag to reorder">
-                  {track.name}
-                </span>
-                <div className="track-label-actions">
-                  <button
-                    type="button"
-                    className="btn-ghost track-move-btn"
-                    title="Move track up"
-                    disabled={index === 0}
-                    data-testid={`track-up-${track.id}`}
-                    onClick={() => moveTrack(track.id, 'up')}
-                  >
-                    <ChevronUp size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost track-move-btn"
-                    title="Move track down"
-                    disabled={index === tracks.length - 1}
-                    data-testid={`track-down-${track.id}`}
-                    onClick={() => moveTrack(track.id, 'down')}
-                  >
-                    <ChevronDown size={12} />
-                  </button>
-                  {track.kind !== 'text' ? (
+                <div className="track-label-top">
+                  <span className="track-label-name" title="Drag to reorder">
+                    {track.name}
+                  </span>
+                  <div className="track-label-actions">
                     <button
                       type="button"
-                      className="btn-ghost"
-                      title="Mute"
-                      onClick={() => toggleTrackMute(track.id)}
+                      className="btn-ghost track-move-btn"
+                      title="Move track up"
+                      disabled={index === 0}
+                      data-testid={`track-up-${track.id}`}
+                      onClick={() => moveTrack(track.id, 'up')}
                     >
-                      {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                      <ChevronUp size={12} />
                     </button>
-                  ) : null}
+                    <button
+                      type="button"
+                      className="btn-ghost track-move-btn"
+                      title="Move track down"
+                      disabled={index === tracks.length - 1}
+                      data-testid={`track-down-${track.id}`}
+                      onClick={() => moveTrack(track.id, 'down')}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                    {track.kind !== 'text' ? (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        title="Mute"
+                        onClick={() => toggleTrackMute(track.id)}
+                      >
+                        {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+                {track.kind === 'video' || track.kind === 'text' ? (
+                  <select
+                    className="track-blend-select"
+                    title="Blend mode (with layers below)"
+                    data-testid={`track-blend-${track.id}`}
+                    value={getBlendMode(track.blendMode).id}
+                    draggable={false}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    onDragStart={(e) => e.preventDefault()}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (isBlendModeId(v)) setTrackBlendMode(track.id, v as BlendModeId)
+                    }}
+                  >
+                    {BLEND_GROUPS.map((g) => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.modes.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                ) : null}
               </div>
               <div
                 className="track-lane"
