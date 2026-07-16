@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "name": "Untitled Project",
+  "settings": {
+    "width": 1612,
+    "height": 998,
+    "fps": 30
+  },
+  "sequenceSized": true,
+  "assets": [
+    {
+      "id": "ecf14910-d022-4ed4-be35-4e096c8ed9d3",
+      "path": "C:\\Users\\chagl\\Documents\\WhatsApp Video 2026-07-01 at 11.42.18.mp4",
+      "proxyPath": "C:\\TEMP\\vidit-proxies\\d6adde4efa8a0a0419bd.mp4",
+      "name": "WhatsApp Video 2026-07-01 at 11.42.18.mp4",
+      "kind": "video",
+      "duration": 42.3,
+      "width": 1612,
+      "height": 998,
+      "fps": 30,
+      "hasAudio": false,
+      "hasVideo": true,
+      "codec": "h264"
+    },
+    {
+      "id": "6e440583-9cff-4e36-b3b6-bf4696a699b5",
+      "path": "C:\\Users\\chagl\\Documents\\cerendavetiye.mp4",
+      "proxyPath": "C:\\TEMP\\vidit-proxies\\e6071df14d7dd961b4e6.mp4",
+      "name": "cerendavetiye.mp4",
+      "kind": "video",
+      "duration": 11.690667,
+      "width": 1086,
+      "height": 1448,
+      "fps": 24,
+      "hasAudio": true,
+      "hasVideo": true,
+      "codec": "h264"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "text-1",
+      "kind": "text",
+      "name": "Text",
+      "muted": false,
+      "locked": false,
+      "height": 40
+    },
+    {
+      "id": "v2",
+      "kind": "video",
+      "name": "V2",
+      "muted": false,
+      "locked": false,
+      "height": 56
+    },
+    {
+      "id": "v1",
+      "kind": "video",
+      "name": "V1",
+      "muted": false,
+      "locked": false,
+      "height": 56
+    },
+    {
+      "id": "a1",
+      "kind": "audio",
+      "name": "A1",
+      "muted": false,
+      "locked": false,
+      "height": 40
+    }
+  ],
+  "clips": [
+    {
+      "id": "03b2ee38-44ef-4f73-a3fd-5da8c243ad47",
+      "assetId": "ecf14910-d022-4ed4-be35-4e096c8ed9d3",
+      "trackId": "v1",
+      "start": 0,
+      "duration": 42.3,
+      "inPoint": 0,
+      "outPoint": 42.3,
+      "speed": 1,
+      "reverse": false,
+      "volume": 1,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "transitionIn": 0
+    },
+    {
+      "id": "a626713d-268a-4a87-8a28-f9a59f5441d9",
+      "assetId": "6e440583-9cff-4e36-b3b6-bf4696a699b5",
+      "trackId": "v2",
+      "start": 3.1416664123535156,
+      "duration": 11.690667,
+      "inPoint": 0,
+      "outPoint": 11.690667,
+      "speed": 1,
+      "reverse": false,
+      "volume": 1,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "transitionIn": 0
+    }
+  ],
+  "textClips": [
+    {
+      "id": "d26ea7bc-a799-4031-9b04-1bb5197bc7c7",
+      "trackId": "text-1",
+      "start": 7.9333335876464846,
+      "duration": 4,
+      "text": "Add your text",
+      "fontFamily": "Inter",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "bold": false,
+      "italic": false,
+      "align": "right",
+      "verticalAlign": "top",
+      "x": 0.92,
+      "y": 0.12,
+      "opacity": 1,
+      "outlineEnabled": true,
+      "outlineColor": "#000000",
+      "outlineWidth": 7,
+      "shadowEnabled": true,
+      "shadowColor": "#000000",
+      "shadowOpacity": 0.74,
+      "shadowBlur": 8,
+      "shadowOffsetX": 3,
+      "shadowOffsetY": 3,
+      "bevelEnabled": false,
+      "bevelDepth": 2
+    }
+  ],
+  "playhead": 8.625,
+  "zoom": 1,
+  "previewScale": 100
+}

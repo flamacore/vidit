@@ -1,0 +1,31 @@
+:root {
+  --bg-app: #141517;
+  --bg-panel: #1c1d21;
+  --bg-elevated: #24262b;
+  --bg-hover: #2c2e35;
+  --bg-active: #353842;
+  --border: #2e3038;
+  --border-strong: #3d404a;
+  --text: #e8e9ed;
+  --text-muted: #9a9cab;
+  --text-dim: #6b6e7c;
+  --accent: #3db8a8;
+  --accent-hover: #4ec9b9;
+  --accent-muted: rgba(61, 184, 168, 0.18);
+  --danger: #e85d5d;
+  --clip-video: #2f6f7a;
+  --clip-video-sel: #3db8a8;
+  --clip-audio: #4a6a4e;
+  --clip-text: #6b5a8a;
+  --playhead: #f0f2f5;
+  --ruler: #5a5d6a;
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --radius: 6px;
+  --radius-sm: 4px;
+  --font-ui: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+  --titlebar: 40px;
+  --sidebar-w: 260px;
+  --inspector-w: 280px;
+  --timeline-h: 280px;
+}
