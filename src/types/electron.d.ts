@@ -22,6 +22,9 @@ interface ViditApi {
   getPathForFile: (file: File) => string
   exportProject: (plan: ExportPlan) => Promise<void>
   onExportProgress: (cb: (p: ExportProgress) => void) => () => void
+  createBakeDir: () => Promise<{ dir: string }>
+  writeBakeFrame: (dir: string, index: number, bytes: Uint8Array) => Promise<void>
+  encodeBakeDir: (dir: string, fps: number) => Promise<{ path: string }>
   platform: string
 }
 

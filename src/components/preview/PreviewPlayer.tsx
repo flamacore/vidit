@@ -10,9 +10,11 @@ import {
   withTextDefaults,
 } from '../../lib/textStyle'
 import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
-import type { MediaAsset, TextClip, TimelineClip, Track } from '../../types/project'
+import type { MediaAsset, ModelClip, TextClip, TimelineClip, Track } from '../../types/project'
 import { AudioOutputSelect, useAudioOutputId } from './AudioOutputSelect'
 import { PreviewLayer } from './PreviewLayer'
+import { PreviewModelLayer } from './PreviewModelLayer'
+import { SceneChrome } from './SceneChrome'
 import { SequenceSettingsModal } from './SequenceSettingsModal'
 import { TransformOverlay } from './TransformOverlay'
 
@@ -23,8 +25,14 @@ function layerOpacity(clip: TimelineClip, t: number): number {
   return 1
 }
 
-function isActiveAt(clip: TimelineClip, t: number): boolean {
+function isActiveAt(clip: { start: number; duration: number }, t: number): boolean {
   return t >= clip.start - 1e-4 && t < clip.start + clip.duration
+}
+
+function trackZ(tracks: Track[], trackId: string): number {
+  const idx = tracks.findIndex((tr) => tr.id === trackId)
+  if (idx < 0) return 0
+  return tracks.length - idx
 }
 
 function videoLayers(
@@ -33,24 +41,49 @@ function videoLayers(
   assets: MediaAsset[],
 ): { clip: TimelineClip; asset: MediaAsset; z: number }[] {
   const assetMap = new Map(assets.map((a) => [a.id, a]))
-  // Timeline list order: top rows composite above bottom rows (V2 over V1)
-  const order = [...tracks]
   return clips
     .map((clip) => {
       const asset = assetMap.get(clip.assetId)
       if (!asset) return null
       if (!asset.hasVideo && asset.kind !== 'image') return null
-      const idx = order.findIndex((tr) => tr.id === clip.trackId)
-      if (idx < 0) return null
-      const z = order.length - idx
+      const z = trackZ(tracks, clip.trackId)
+      if (z <= 0) return null
       return { clip, asset, z }
     })
     .filter((x): x is { clip: TimelineClip; asset: MediaAsset; z: number } => Boolean(x))
     .sort((a, b) => a.z - b.z)
 }
 
-function activeTexts(texts: TextClip[], t: number): TextClip[] {
-  return texts.filter((tx) => t >= tx.start - 1e-4 && t < tx.start + tx.duration)
+function modelLayers(
+  models: ModelClip[],
+  tracks: Track[],
+  assets: MediaAsset[],
+  threeDEnabled: boolean,
+): { clip: ModelClip; asset: MediaAsset; z: number }[] {
+  if (!threeDEnabled) return []
+  const assetMap = new Map(assets.map((a) => [a.id, a]))
+  return models
+    .map((clip) => {
+      const asset = assetMap.get(clip.assetId)
+      if (!asset || asset.kind !== 'model') return null
+      const track = tracks.find((t) => t.id === clip.trackId)
+      if (!track || track.kind !== 'model' || track.muted) return null
+      const z = trackZ(tracks, clip.trackId)
+      return { clip, asset, z }
+    })
+    .filter((x): x is { clip: ModelClip; asset: MediaAsset; z: number } => Boolean(x))
+    .sort((a, b) => a.z - b.z)
+}
+
+function activeTexts(
+  texts: TextClip[],
+  tracks: Track[],
+  t: number,
+): { text: TextClip; z: number }[] {
+  return texts
+    .filter((tx) => isActiveAt(tx, t))
+    .map((text) => ({ text, z: trackZ(tracks, text.trackId) }))
+    .sort((a, b) => a.z - b.z)
 }
 
 export function PreviewPlayer() {
@@ -58,6 +91,9 @@ export function PreviewPlayer() {
   const isPlaying = useProjectStore((s) => s.isPlaying)
   const clips = useProjectStore((s) => s.clips)
   const textClips = useProjectStore((s) => s.textClips)
+  const modelClips = useProjectStore((s) => s.modelClips)
+  const camera = useProjectStore((s) => s.camera)
+  const light = useProjectStore((s) => s.light)
   const assets = useProjectStore((s) => s.assets)
   const tracks = useProjectStore((s) => s.tracks)
   const settings = useProjectStore((s) => s.settings)
@@ -92,8 +128,18 @@ export function PreviewPlayer() {
   const duration = getSequenceDuration()
   // Keep all video layers mounted — switching clips must not re-fetch blobs
   const layers = useMemo(() => videoLayers(clips, tracks, assets), [clips, tracks, assets])
-  const texts = useMemo(() => activeTexts(textClips, playhead), [textClips, playhead])
-  const anyActive = layers.some((l) => isActiveAt(l.clip, playhead)) || texts.length > 0
+  const models = useMemo(
+    () => modelLayers(modelClips, tracks, assets, settings.threeDEnabled),
+    [modelClips, tracks, assets, settings.threeDEnabled],
+  )
+  const texts = useMemo(
+    () => activeTexts(textClips, tracks, playhead),
+    [textClips, tracks, playhead],
+  )
+  const anyActive =
+    layers.some((l) => isActiveAt(l.clip, playhead)) ||
+    models.some((l) => isActiveAt(l.clip, playhead)) ||
+    texts.length > 0
 
   useEffect(() => {
     if (!isPlaying) {
@@ -127,7 +173,7 @@ export function PreviewPlayer() {
     return () => cancelAnimationFrame(rafRef.current)
   }, [isPlaying])
 
-  const empty = clips.length === 0 && textClips.length === 0
+  const empty = clips.length === 0 && textClips.length === 0 && modelClips.length === 0
   const noLayer = !empty && !anyActive
   const scale = previewScale / 100
 
@@ -179,48 +225,69 @@ export function PreviewPlayer() {
                   />
                 )
               })}
-            </div>
-            {texts.map((raw) => {
-              const text = withTextDefaults(raw)
-              const xform = transformStyle(withTransform(text))
-              const blend = getBlendMode(tracks.find((t) => t.id === text.trackId)?.blendMode)
-              return (
-                <div
-                  key={text.id}
-                  className="preview-text-layer"
-                  style={{
-                    zIndex: 80,
-                    mixBlendMode: blend.css as CSSProperties['mixBlendMode'],
-                  }}
-                >
+              {models.map((layer) => {
+                const active = isActiveAt(layer.clip, playhead)
+                const blend = getBlendMode(
+                  tracks.find((t) => t.id === layer.clip.trackId)?.blendMode,
+                )
+                return (
+                  <PreviewModelLayer
+                    key={layer.clip.id}
+                    clipId={layer.clip.id}
+                    asset={layer.asset}
+                    camera={camera}
+                    light={light}
+                    width={settings.width}
+                    height={settings.height}
+                    active={active}
+                    zIndex={10 + layer.z}
+                    mixBlendMode={blend.css}
+                    assets={assets}
+                  />
+                )
+              })}
+              {texts.map(({ text: raw, z }) => {
+                const text = withTextDefaults(raw)
+                const xform = transformStyle(withTransform(text))
+                const blend = getBlendMode(tracks.find((t) => t.id === text.trackId)?.blendMode)
+                return (
                   <div
-                    className="preview-layer-xform"
-                    style={{ left: xform.left, top: xform.top, transform: xform.transform }}
+                    key={text.id}
+                    className="preview-text-layer"
+                    style={{
+                      zIndex: 10 + z,
+                      mixBlendMode: blend.css as CSSProperties['mixBlendMode'],
+                    }}
                   >
-                    <span
-                      data-vidit-layer={`text:${text.id}`}
-                      style={{
-                        color: colorWithAlpha(text.color, text.opacity * xform.opacity),
-                        fontFamily: `${text.fontFamily}, sans-serif`,
-                        fontSize: `calc(${text.fontSize / settings.height} * 100cqh)`,
-                        fontWeight: text.bold ? 700 : 400,
-                        fontStyle: text.italic ? 'italic' : 'normal',
-                        WebkitTextStroke: text.outlineEnabled
-                          ? `${text.outlineWidth}px ${text.outlineColor}`
-                          : undefined,
-                        paintOrder: 'stroke fill',
-                        textShadow: buildPreviewTextShadow(text),
-                        clipPath: xform.clipPath,
-                        whiteSpace: 'pre-wrap',
-                        textAlign: text.align,
-                      }}
+                    <div
+                      className="preview-layer-xform"
+                      style={{ left: xform.left, top: xform.top, transform: xform.transform }}
                     >
-                      {text.text}
-                    </span>
+                      <span
+                        data-vidit-layer={`text:${text.id}`}
+                        style={{
+                          color: colorWithAlpha(text.color, text.opacity * xform.opacity),
+                          fontFamily: `${text.fontFamily}, sans-serif`,
+                          fontSize: `calc(${text.fontSize / settings.height} * 100cqh)`,
+                          fontWeight: text.bold ? 700 : 400,
+                          fontStyle: text.italic ? 'italic' : 'normal',
+                          WebkitTextStroke: text.outlineEnabled
+                            ? `${text.outlineWidth}px ${text.outlineColor}`
+                            : undefined,
+                          paintOrder: 'stroke fill',
+                          textShadow: buildPreviewTextShadow(text),
+                          clipPath: xform.clipPath,
+                          whiteSpace: 'pre-wrap',
+                          textAlign: text.align,
+                        }}
+                      >
+                        {text.text}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
             <TransformOverlay />
             {empty ? (
               <div className="preview-placeholder">Drop clips on the timeline to preview</div>
@@ -231,6 +298,7 @@ export function PreviewPlayer() {
           </div>
         </div>
         <div className="preview-meta-row">
+          <SceneChrome />
           <span className="preview-meta">
             <button
               type="button"

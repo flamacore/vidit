@@ -11,6 +11,12 @@ import {
   splitClipAtTime,
 } from '../lib/timelineEdit'
 import { DEFAULT_TRANSFORM } from '../lib/elementTransform'
+import {
+  DEFAULT_CAMERA,
+  DEFAULT_LIGHT,
+  makeModelClip,
+  withModelDefaults,
+} from '../lib/model3d'
 import { DEFAULT_TEXT_STYLE } from '../lib/textStyle'
 import { clamp, projectDuration, pxToTime } from '../lib/timelineMath'
 import {
@@ -25,6 +31,9 @@ import {
 } from '../../shared/blendModes'
 import type {
   MediaAsset,
+  ModelClip,
+  ProjectCamera,
+  ProjectLight,
   ProjectSettings,
   ProjectState,
   Selection,
@@ -33,6 +42,7 @@ import type {
   TextVAlign,
   TimelineClip,
   Track,
+  TrackKind,
 } from '../types/project'
 
 enableMapSet()
@@ -46,7 +56,16 @@ function cloneData<T>(value: T): T {
 
 type EditableSlice = Pick<
   ProjectState,
-  'assets' | 'tracks' | 'clips' | 'textClips' | 'settings' | 'name' | 'sequenceSized'
+  | 'assets'
+  | 'tracks'
+  | 'clips'
+  | 'textClips'
+  | 'modelClips'
+  | 'camera'
+  | 'light'
+  | 'settings'
+  | 'name'
+  | 'sequenceSized'
 >
 
 interface HistoryState {
@@ -71,6 +90,7 @@ interface ProjectStore extends ProjectState {
   select: (sel: Selection) => void
   selectTimelineClip: (id: string, mode: 'replace' | 'toggle' | 'range') => void
   selectTimelineText: (id: string, mode: 'replace' | 'toggle' | 'range') => void
+  selectTimelineModel: (id: string, mode: 'replace' | 'toggle' | 'range') => void
   clearTimelineSelection: () => void
   setMediaSelection: (ids: string[]) => void
   toggleMediaSelect: (id: string, mode: 'replace' | 'toggle' | 'range') => void
@@ -80,6 +100,7 @@ interface ProjectStore extends ProjectState {
   patchAsset: (id: string, patch: Partial<MediaAsset>) => void
   addClipFromAsset: (assetId: string, trackId: string, start: number) => void
   addClipsFromAssets: (assetIds: string[], trackId: string, start: number) => void
+  addModelsFromAssets: (assetIds: string[], trackId: string, start: number) => void
   addTextClip: (trackId?: string) => void
   beginGesture: () => void
   endGesture: () => void
@@ -97,6 +118,13 @@ interface ProjectStore extends ProjectState {
     primaryId: string,
     primaryTarget: number,
   ) => void
+  moveModelsFromOrigins: (
+    origins: Record<string, number>,
+    primaryId: string,
+    primaryTarget: number,
+    targetTrackId?: string,
+  ) => void
+  finalizeModelDrag: (ids: string[], trackId: string, dropTime: number) => void
   loadProjectState: (data: {
     name: string
     settings: ProjectState['settings']
@@ -105,6 +133,9 @@ interface ProjectStore extends ProjectState {
     tracks: Track[]
     clips: TimelineClip[]
     textClips: TextClip[]
+    modelClips?: ModelClip[]
+    camera?: ProjectCamera
+    light?: ProjectLight
     playhead: number
     zoom: number
     previewScale: number
@@ -117,12 +148,18 @@ interface ProjectStore extends ProjectState {
     tracks: Track[]
     clips: TimelineClip[]
     textClips: TextClip[]
+    modelClips: ModelClip[]
+    camera: ProjectCamera
+    light: ProjectLight
     playhead: number
     zoom: number
     previewScale: number
   }
   trimClip: (id: string, edge: 'in' | 'out', time: number) => void
   updateSettings: (patch: Partial<ProjectSettings>) => void
+  updateCamera: (patch: Partial<ProjectCamera>) => void
+  updateLight: (patch: Partial<ProjectLight>) => void
+  ensureModelTrack: () => void
   updateClip: (id: string, patch: Partial<TimelineClip>) => void
   /** Patch every selected clip (or the given ids). */
   updateClips: (ids: string[], patch: Partial<TimelineClip>) => void
@@ -137,17 +174,23 @@ interface ProjectStore extends ProjectState {
   }) => void
   updateText: (id: string, patch: Partial<TextClip>) => void
   updateTexts: (ids: string[], patch: Partial<TextClip>) => void
+  updateModel: (id: string, patch: Partial<ModelClip>) => void
+  updateModels: (ids: string[], patch: Partial<ModelClip>) => void
   moveText: (id: string, start: number) => void
   trimText: (id: string, edge: 'in' | 'out', time: number) => void
+  moveModel: (id: string, start: number, trackId?: string) => void
+  trimModel: (id: string, edge: 'in' | 'out', time: number) => void
   splitAtPlayhead: () => void
   deleteSelection: () => void
+  /** Remove media bin assets and all timeline clips/models that use them. */
+  removeAssets: (ids?: string[]) => void
   copySelection: () => Promise<void>
   pasteClipboard: () => Promise<void>
   cutSelection: () => Promise<void>
   toggleTrackMute: (trackId: string) => void
   setTrackBlendMode: (trackId: string, blendMode: BlendModeId) => void
-  /** Add a video (above existing video) or audio (below existing audio) track. */
-  addTrack: (kind: 'video' | 'audio') => void
+  /** Add a video/model (above peers) or audio (below existing audio) track. */
+  addTrack: (kind: 'video' | 'audio' | 'model') => void
   /** Move track one row up (toward index 0) or down. */
   moveTrack: (trackId: string, direction: 'up' | 'down') => void
   /** Place `trackId` at the index of `targetId` (target shifts toward the gap). */
@@ -155,8 +198,8 @@ interface ProjectStore extends ProjectState {
   ensureTracks: () => void
 }
 
-function nextTrackName(tracks: Track[], kind: 'video' | 'audio'): string {
-  const prefix = kind === 'video' ? 'V' : 'A'
+function nextTrackName(tracks: Track[], kind: 'video' | 'audio' | 'model'): string {
+  const prefix = kind === 'video' ? 'V' : kind === 'model' ? '3D' : 'A'
   let max = 0
   for (const t of tracks) {
     if (t.kind !== kind) continue
@@ -166,9 +209,15 @@ function nextTrackName(tracks: Track[], kind: 'video' | 'audio'): string {
   return `${prefix}${max + 1}`
 }
 
+function trackMinHeight(kind: TrackKind): number {
+  if (kind === 'video' || kind === 'model') return 72
+  if (kind === 'text') return 58
+  return 40
+}
+
 function normalizeTrack(t: Partial<Track> & Pick<Track, 'id' | 'kind' | 'name'>): Track {
   const kind = t.kind
-  const minH = kind === 'video' ? 72 : kind === 'text' ? 58 : 40
+  const minH = trackMinHeight(kind)
   return {
     id: t.id,
     kind,
@@ -227,9 +276,21 @@ function sliceOf(s: ProjectState): EditableSlice {
     tracks: s.tracks,
     clips: s.clips,
     textClips: s.textClips,
+    modelClips: s.modelClips,
+    camera: s.camera,
+    light: s.light,
     settings: s.settings,
     name: s.name,
     sequenceSized: s.sequenceSized,
+  }
+}
+
+function normalizeSettings(s: Partial<ProjectSettings> | undefined): ProjectSettings {
+  return {
+    width: s?.width ?? 1920,
+    height: s?.height ?? 1080,
+    fps: s?.fps ?? 30,
+    threeDEnabled: Boolean(s?.threeDEnabled),
   }
 }
 
@@ -293,14 +354,18 @@ function normalizeText(t: Partial<TextClip> & Pick<TextClip, 'id' | 'trackId' | 
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   name: 'Untitled Project',
-  settings: { width: 1920, height: 1080, fps: 30 },
+  settings: { width: 1920, height: 1080, fps: 30, threeDEnabled: false },
   assets: [],
   tracks: defaultTracks(),
   clips: [],
   textClips: [],
+  modelClips: [],
+  camera: { ...DEFAULT_CAMERA },
+  light: { ...DEFAULT_LIGHT },
   selection: { type: 'none' },
   selectedClipIds: [],
   selectedTextIds: [],
+  selectedModelIds: [],
   selectedMediaIds: [],
   playhead: 0,
   zoom: 1,
@@ -326,13 +391,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       selection: sel,
       selectedClipIds: sel.type === 'clip' ? [sel.id] : [],
       selectedTextIds: sel.type === 'text' ? [sel.id] : [],
+      selectedModelIds: sel.type === 'model' ? [sel.id] : [],
     }),
   clearTimelineSelection: () =>
-    set({ selection: { type: 'none' }, selectedClipIds: [], selectedTextIds: [] }),
+    set({
+      selection: { type: 'none' },
+      selectedClipIds: [],
+      selectedTextIds: [],
+      selectedModelIds: [],
+    }),
   selectTimelineClip: (id, mode) =>
     set(
       produce((s: ProjectStore) => {
         s.selectedTextIds = []
+        s.selectedModelIds = []
         if (mode === 'replace') {
           s.selectedClipIds = [id]
         } else if (mode === 'toggle') {
@@ -364,6 +436,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set(
       produce((s: ProjectStore) => {
         s.selectedClipIds = []
+        s.selectedModelIds = []
         if (mode === 'replace') {
           s.selectedTextIds = [id]
         } else if (mode === 'toggle') {
@@ -385,6 +458,38 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         s.selection =
           s.selectedTextIds.length > 0
             ? { type: 'text', id: s.selectedTextIds[s.selectedTextIds.length - 1]! }
+            : { type: 'none' }
+      }),
+    ),
+  selectTimelineModel: (id, mode) =>
+    set(
+      produce((s: ProjectStore) => {
+        s.selectedClipIds = []
+        s.selectedTextIds = []
+        if (mode === 'replace') {
+          s.selectedModelIds = [id]
+        } else if (mode === 'toggle') {
+          s.selectedModelIds = s.selectedModelIds.includes(id)
+            ? s.selectedModelIds.filter((x) => x !== id)
+            : [...s.selectedModelIds, id]
+        } else {
+          const trackId = s.modelClips.find((c) => c.id === id)?.trackId
+          const onTrack = s.modelClips
+            .filter((c) => c.trackId === trackId)
+            .sort((a, b) => a.start - b.start)
+          const ids = onTrack.map((c) => c.id)
+          const anchor = s.selectedModelIds[0] ?? id
+          const a = ids.indexOf(anchor)
+          const b = ids.indexOf(id)
+          if (a < 0 || b < 0) s.selectedModelIds = [id]
+          else {
+            const [lo, hi] = a < b ? [a, b] : [b, a]
+            s.selectedModelIds = ids.slice(lo, hi + 1)
+          }
+        }
+        s.selection =
+          s.selectedModelIds.length > 0
+            ? { type: 'model', id: s.selectedModelIds[s.selectedModelIds.length - 1]! }
             : { type: 'none' }
       }),
     ),
@@ -479,11 +584,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set(
       produce((s: ProjectStore) => {
         const track = s.tracks.find((t) => t.id === trackId)
-        if (!track || track.locked || track.kind === 'text') return
+        if (!track || track.locked || track.kind === 'text' || track.kind === 'model') return
         const assets = assetIds
           .map((id) => s.assets.find((a) => a.id === id))
           .filter((a): a is MediaAsset => Boolean(a))
           .filter((asset) => {
+            if (asset.kind === 'model') return false
             if (track.kind === 'audio') return asset.hasAudio || asset.kind === 'audio'
             return asset.hasVideo || asset.kind === 'image' || asset.hasAudio
           })
@@ -517,6 +623,62 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         if (lastId) {
           s.selection = { type: 'clip', id: lastId }
           s.selectedClipIds = newIds
+          s.selectedTextIds = []
+          s.selectedModelIds = []
+        }
+      }),
+    ),
+
+  addModelsFromAssets: (assetIds, trackId, start) =>
+    set(
+      produce((s: ProjectStore) => {
+        if (!s.settings.threeDEnabled) return
+        const track = s.tracks.find((t) => t.id === trackId)
+        if (!track || track.locked || track.kind !== 'model') return
+        const assets = assetIds
+          .map((id) => s.assets.find((a) => a.id === id))
+          .filter((a): a is MediaAsset => Boolean(a && a.kind === 'model'))
+        if (assets.length === 0) return
+
+        pushHistory(s)
+        const empty = new Set<string>()
+        let insertAt = closestCutOnTrack(start, s.modelClips, trackId, empty)
+        const covering = findCoveringClip(s.modelClips, trackId, start, empty)
+        if (covering) {
+          // Models have no in/out points — split by trimming duration
+          const cut = start
+          const rightDur = covering.start + covering.duration - cut
+          if (rightDur > 0.05 && cut > covering.start + 0.05) {
+            const right = withModelDefaults({
+              ...cloneData(covering),
+              id: uuid(),
+              start: cut,
+              duration: rightDur,
+            })
+            covering.duration = cut - covering.start
+            s.modelClips.push(right)
+          }
+          insertAt = start
+        }
+
+        const totalDur = assets.reduce((sum, a) => sum + Math.max(0.1, a.duration || 5), 0)
+        rippleForward(s.modelClips, trackId, insertAt, totalDur, empty)
+
+        let cursor = insertAt
+        let lastId = ''
+        const newIds: string[] = []
+        for (const asset of assets) {
+          const dur = Math.max(0.1, asset.duration || 5)
+          const clip = makeModelClip(asset.id, trackId, cursor, dur, uuid())
+          s.modelClips.push(clip)
+          newIds.push(clip.id)
+          lastId = clip.id
+          cursor += clip.duration
+        }
+        if (lastId) {
+          s.selection = { type: 'model', id: lastId }
+          s.selectedModelIds = newIds
+          s.selectedClipIds = []
           s.selectedTextIds = []
         }
       }),
@@ -724,6 +886,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       tracks: s.tracks,
       clips: s.clips,
       textClips: s.textClips,
+      modelClips: s.modelClips,
+      camera: s.camera,
+      light: s.light,
       playhead: s.playhead,
       zoom: s.zoom,
       previewScale: s.previewScale,
@@ -733,18 +898,22 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   loadProjectState: (data) =>
     set({
       name: data.name,
-      settings: data.settings,
+      settings: normalizeSettings(data.settings),
       sequenceSized: data.sequenceSized,
       assets: data.assets,
       tracks: data.tracks.map((t) => normalizeTrack(t as Track)),
       clips: data.clips.map(normalizeClip),
       textClips: data.textClips.map(normalizeText),
+      modelClips: (data.modelClips ?? []).map((m) => withModelDefaults(m)),
+      camera: { ...DEFAULT_CAMERA, ...data.camera },
+      light: { ...DEFAULT_LIGHT, ...data.light },
       playhead: data.playhead,
       zoom: data.zoom,
       previewScale: data.previewScale,
       selection: { type: 'none' },
       selectedClipIds: [],
       selectedTextIds: [],
+      selectedModelIds: [],
       selectedMediaIds: [],
       isPlaying: false,
       history: { past: [], future: [] },
@@ -803,10 +972,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         const width = Math.round(clamp(nextW, 16, 8192) / 2) * 2
         const height = Math.round(clamp(nextH, 16, 8192) / 2) * 2
         const fps = Math.round(clamp(nextFps, 1, 240) * 1000) / 1000
+        const threeDEnabled =
+          patch.threeDEnabled !== undefined ? Boolean(patch.threeDEnabled) : s.settings.threeDEnabled
         if (
           width === s.settings.width &&
           height === s.settings.height &&
-          fps === s.settings.fps
+          fps === s.settings.fps &&
+          threeDEnabled === s.settings.threeDEnabled
         ) {
           return
         }
@@ -814,7 +986,68 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         s.settings.width = width
         s.settings.height = height
         s.settings.fps = fps
+        s.settings.threeDEnabled = threeDEnabled
         s.sequenceSized = true
+        if (threeDEnabled && !s.tracks.some((t) => t.kind === 'model')) {
+          const track: Track = {
+            id: uuid(),
+            kind: 'model',
+            name: nextTrackName(s.tracks, 'model'),
+            muted: false,
+            locked: false,
+            height: 72,
+            blendMode: DEFAULT_BLEND_MODE,
+          }
+          const firstVideo = s.tracks.findIndex((t) => t.kind === 'video')
+          const idx = firstVideo >= 0 ? firstVideo : s.tracks.length
+          s.tracks.splice(idx, 0, track)
+        }
+      }),
+    ),
+
+  updateCamera: (patch) =>
+    set(
+      produce((s: ProjectStore) => {
+        if (!s.gestureActive) pushHistory(s)
+        Object.assign(s.camera, patch)
+        if (s.camera.distance != null) s.camera.distance = clamp(s.camera.distance, 0.2, 3000)
+        if (s.camera.fov != null) s.camera.fov = clamp(s.camera.fov, 10, 120)
+        if (s.camera.pitch != null) s.camera.pitch = clamp(s.camera.pitch, -89, 89)
+        if (s.camera.posX != null) s.camera.posX = clamp(s.camera.posX, -5000, 5000)
+        if (s.camera.posY != null) s.camera.posY = clamp(s.camera.posY, -5000, 5000)
+        if (s.camera.posZ != null) s.camera.posZ = clamp(s.camera.posZ, -5000, 5000)
+      }),
+    ),
+
+  updateLight: (patch) =>
+    set(
+      produce((s: ProjectStore) => {
+        if (!s.gestureActive) pushHistory(s)
+        Object.assign(s.light, patch)
+        if (s.light.intensity != null) s.light.intensity = clamp(s.light.intensity, 0, 100)
+        if (s.light.shadowOpacity != null)
+          s.light.shadowOpacity = clamp(s.light.shadowOpacity, 0, 1)
+        if (s.light.pitch != null) s.light.pitch = clamp(s.light.pitch, -89, 89)
+      }),
+    ),
+
+  ensureModelTrack: () =>
+    set(
+      produce((s: ProjectStore) => {
+        if (s.tracks.some((t) => t.kind === 'model')) return
+        pushHistory(s)
+        const track: Track = {
+          id: uuid(),
+          kind: 'model',
+          name: nextTrackName(s.tracks, 'model'),
+          muted: false,
+          locked: false,
+          height: 72,
+          blendMode: DEFAULT_BLEND_MODE,
+        }
+        const firstVideo = s.tracks.findIndex((t) => t.kind === 'video')
+        const idx = firstVideo >= 0 ? firstVideo : s.tracks.length
+        s.tracks.splice(idx, 0, track)
       }),
     ),
 
@@ -860,7 +1093,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           : s.selection.type === 'text'
             ? [s.selection.id]
             : []
-        if (!clipIds.length && !textIds.length) return
+        const modelIds = s.selectedModelIds.length
+          ? s.selectedModelIds
+          : s.selection.type === 'model'
+            ? [s.selection.id]
+            : []
+        if (!clipIds.length && !textIds.length && !modelIds.length) return
         pushHistory(s)
         const pivotX = delta.pivotX ?? 0.5
         const pivotY = delta.pivotY ?? 0.5
@@ -889,6 +1127,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           const t = s.textClips.find((x) => x.id === id)
           if (t) apply(t)
         }
+        for (const id of modelIds) {
+          const m = s.modelClips.find((x) => x.id === id)
+          if (m) apply(m)
+        }
       }),
     ),
 
@@ -910,6 +1152,164 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         for (const id of ids) {
           const text = s.textClips.find((t) => t.id === id)
           if (text) Object.assign(text, patch)
+        }
+      }),
+    ),
+
+  updateModel: (id, patch) =>
+    set(
+      produce((s: ProjectStore) => {
+        const model = s.modelClips.find((m) => m.id === id)
+        if (!model) return
+        // Skip history spam while scrubbing inspector sliders
+        if (!s.gestureActive) pushHistory(s)
+        Object.assign(model, patch)
+      }),
+    ),
+
+  updateModels: (ids, patch) =>
+    set(
+      produce((s: ProjectStore) => {
+        if (!ids.length) return
+        pushHistory(s)
+        for (const id of ids) {
+          const model = s.modelClips.find((m) => m.id === id)
+          if (model) Object.assign(model, patch)
+        }
+      }),
+    ),
+
+  moveModel: (id, start, trackId) => {
+    const s = get()
+    const origins: Record<string, number> = {}
+    const ids =
+      s.selectedModelIds.includes(id) && s.selectedModelIds.length > 1
+        ? s.selectedModelIds
+        : [id]
+    for (const mid of ids) {
+      const m = s.modelClips.find((x) => x.id === mid)
+      if (m) origins[mid] = m.start
+    }
+    get().moveModelsFromOrigins(origins, id, start, trackId)
+  },
+
+  moveModelsFromOrigins: (origins, primaryId, primaryTarget, targetTrackId) =>
+    set(
+      produce((s: ProjectStore) => {
+        const ids = Object.keys(origins)
+        if (ids.length === 0) return
+        pushHistory(s)
+        const moving = new Set(ids)
+        const targets = collectSnapTargets(
+          s.playhead,
+          [
+            ...s.clips.map((c) => ({ id: c.id, start: c.start, duration: c.duration })),
+            ...s.modelClips
+              .filter((m) => !moving.has(m.id))
+              .map((m) => ({ id: m.id, start: m.start, duration: m.duration })),
+          ],
+        )
+        const snapped = snapTime(primaryTarget, targets, pxToTime(8, s.zoom), s.snapEnabled)
+        const primaryOrig = origins[primaryId] ?? 0
+        const delta = snapped.time - primaryOrig
+
+        let nextTrack = targetTrackId
+        if (nextTrack) {
+          const track = s.tracks.find((t) => t.id === nextTrack)
+          if (!track || track.locked || track.kind !== 'model') nextTrack = undefined
+        }
+
+        for (const mid of ids) {
+          const m = s.modelClips.find((x) => x.id === mid)
+          const orig = origins[mid]
+          if (!m || orig == null) continue
+          m.start = Math.max(0, orig + delta)
+          if (nextTrack) m.trackId = nextTrack
+        }
+      }),
+    ),
+
+  finalizeModelDrag: (ids, trackId, dropTime) =>
+    set(
+      produce((s: ProjectStore) => {
+        if (ids.length === 0) return
+        const track = s.tracks.find((t) => t.id === trackId)
+        if (!track || track.locked || track.kind !== 'model') return
+
+        const movers = ids
+          .map((id) => s.modelClips.find((c) => c.id === id))
+          .filter((c): c is ModelClip => Boolean(c))
+        if (movers.length === 0) return
+
+        const moving = new Set(ids)
+        const minStart = Math.min(...movers.map((c) => c.start))
+        const maxEnd = Math.max(...movers.map((c) => c.start + c.duration))
+        const overlaps = s.modelClips.some(
+          (c) =>
+            c.trackId === trackId &&
+            !moving.has(c.id) &&
+            c.start < maxEnd - 1e-4 &&
+            c.start + c.duration > minStart + 1e-4,
+        )
+        const covering = findCoveringClip(s.modelClips, trackId, Math.max(0, dropTime), moving)
+
+        if (!overlaps && !covering) {
+          for (const c of movers) c.trackId = trackId
+          return
+        }
+
+        pushHistory(s)
+        let insertAt = Math.max(0, dropTime)
+        if (covering) {
+          const cut = insertAt
+          const rightDur = covering.start + covering.duration - cut
+          if (rightDur > 0.05 && cut > covering.start + 0.05) {
+            const right = withModelDefaults({
+              ...cloneData(covering),
+              id: uuid(),
+              start: cut,
+              duration: rightDur,
+            })
+            covering.duration = cut - covering.start
+            s.modelClips.push(right)
+          }
+        } else {
+          insertAt = closestCutOnTrack(insertAt, s.modelClips, trackId, moving)
+        }
+
+        const span = Math.max(0.01, maxEnd - minStart)
+        const rel = movers.map((c) => ({ id: c.id, offset: c.start - minStart }))
+        rippleForward(s.modelClips, trackId, insertAt, span, moving)
+        for (const r of rel) {
+          const c = s.modelClips.find((x) => x.id === r.id)
+          if (!c) continue
+          c.trackId = trackId
+          c.start = insertAt + r.offset
+        }
+      }),
+    ),
+
+  trimModel: (id, edge, time) =>
+    set(
+      produce((s: ProjectStore) => {
+        const model = s.modelClips.find((m) => m.id === id)
+        if (!model) return
+        pushHistory(s)
+        const prevStart = model.start
+        const prevEnd = model.start + model.duration
+        if (edge === 'in') {
+          const newStart = clamp(time, 0, model.start + model.duration - 0.2)
+          model.duration -= newStart - model.start
+          model.start = newStart
+          if (newStart < prevStart - 1e-4) {
+            pushLeftOnContact(s.modelClips, model.trackId, id, prevStart, newStart)
+          }
+        } else {
+          model.duration = Math.max(0.2, time - model.start)
+          const newEnd = model.start + model.duration
+          if (newEnd > prevEnd + 1e-4) {
+            pushRightOnContact(s.modelClips, model.trackId, id, model.start, newEnd)
+          }
         }
       }),
     ),
@@ -984,6 +1384,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         s.selection = { type: 'clip', id: right.id }
         s.selectedClipIds = [right.id]
         s.selectedTextIds = []
+        s.selectedModelIds = []
       }),
     ),
 
@@ -1000,13 +1401,47 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           : s.selection.type === 'text'
             ? [s.selection.id]
             : []
-        if (clipIds.length === 0 && textIds.length === 0) return
+        const modelIds = s.selectedModelIds.length
+          ? s.selectedModelIds
+          : s.selection.type === 'model'
+            ? [s.selection.id]
+            : []
+        if (clipIds.length === 0 && textIds.length === 0 && modelIds.length === 0) return
         pushHistory(s)
         if (clipIds.length) s.clips = s.clips.filter((c) => !clipIds.includes(c.id))
         if (textIds.length) s.textClips = s.textClips.filter((t) => !textIds.includes(t.id))
+        if (modelIds.length) s.modelClips = s.modelClips.filter((m) => !modelIds.includes(m.id))
         s.selection = { type: 'none' }
         s.selectedClipIds = []
         s.selectedTextIds = []
+        s.selectedModelIds = []
+      }),
+    ),
+
+  removeAssets: (ids) =>
+    set(
+      produce((s: ProjectStore) => {
+        const target = ids?.length ? ids : [...s.selectedMediaIds]
+        if (target.length === 0) return
+        const removeSet = new Set(target)
+        const existed = s.assets.some((a) => removeSet.has(a.id))
+        if (!existed) return
+        pushHistory(s)
+        s.assets = s.assets.filter((a) => !removeSet.has(a.id))
+        s.clips = s.clips.filter((c) => !removeSet.has(c.assetId))
+        s.modelClips = s.modelClips.filter((m) => !removeSet.has(m.assetId))
+        s.selectedMediaIds = s.selectedMediaIds.filter((id) => !removeSet.has(id))
+        // Drop timeline selection if it pointed at removed clips/models
+        const sel = s.selection
+        if (sel.type === 'clip' && !s.clips.some((c) => c.id === sel.id)) {
+          s.selection = { type: 'none' }
+        } else if (sel.type === 'model' && !s.modelClips.some((m) => m.id === sel.id)) {
+          s.selection = { type: 'none' }
+        }
+        s.selectedClipIds = s.selectedClipIds.filter((id) => s.clips.some((c) => c.id === id))
+        s.selectedModelIds = s.selectedModelIds.filter((id) =>
+          s.modelClips.some((m) => m.id === id),
+        )
       }),
     ),
 
@@ -1022,16 +1457,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       : s.selection.type === 'text'
         ? [s.selection.id]
         : []
+    const modelIds = s.selectedModelIds.length
+      ? s.selectedModelIds
+      : s.selection.type === 'model'
+        ? [s.selection.id]
+        : []
     const clips = s.clips.filter((c) => clipIds.includes(c.id)).map(cloneData)
     const texts = s.textClips.filter((t) => textIds.includes(t.id)).map(cloneData)
-    if (!clips.length && !texts.length) return
+    const models = s.modelClips.filter((m) => modelIds.includes(m.id)).map(cloneData)
+    if (!clips.length && !texts.length && !models.length) return
 
-    const assetIds = new Set(clips.map((c) => c.assetId))
+    const assetIds = new Set([
+      ...clips.map((c) => c.assetId),
+      ...models.map((m) => m.assetId),
+    ])
     const assets = s.assets
       .filter((a) => assetIds.has(a.id))
       .map(({ thumbnail: _t, waveform: _w, proxyPath: _p, proxyStatus: _s, ...rest }) => rest)
 
-    const payload: ViditClipboardPayload = { version: 1, clips, texts, assets }
+    const payload: ViditClipboardPayload = { version: 1, clips, texts, models, assets }
     set({ clipboard: payload })
     await writeSystemClipboardLayers(payload)
   },
@@ -1039,7 +1483,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   pasteClipboard: async () => {
     const fromSystem = await readSystemClipboardLayers()
     const payload = fromSystem ?? get().clipboard
-    if (!payload || (!payload.clips.length && !payload.texts.length)) return
+    if (
+      !payload ||
+      (!payload.clips.length && !payload.texts.length && !(payload.models?.length ?? 0))
+    )
+      return
 
     set(
       produce((s: ProjectStore) => {
@@ -1061,19 +1509,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
             id: nid,
             thumbnail: '',
             waveform: [],
-            proxyStatus: a.hasVideo && a.kind !== 'image' ? 'pending' : undefined,
+            proxyStatus:
+              a.kind !== 'image' && a.kind !== 'model' && a.hasVideo ? 'pending' : undefined,
           })
         }
 
         const clipStarts = payload.clips.map((c) => c.start)
         const textStarts = payload.texts.map((t) => t.start)
+        const modelStarts = (payload.models ?? []).map((m) => m.start)
         const minStart = Math.min(
           clipStarts.length ? Math.min(...clipStarts) : Infinity,
           textStarts.length ? Math.min(...textStarts) : Infinity,
+          modelStarts.length ? Math.min(...modelStarts) : Infinity,
         )
         const base = Number.isFinite(minStart) ? minStart : 0
         const newClipIds: string[] = []
         const newTextIds: string[] = []
+        const newModelIds: string[] = []
 
         for (const c of payload.clips) {
           const nid = uuid()
@@ -1096,12 +1548,33 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           s.textClips.push(copy)
           newTextIds.push(nid)
         }
+        for (const m of payload.models ?? []) {
+          if (!s.settings.threeDEnabled) continue
+          let trackId = m.trackId
+          if (!s.tracks.some((t) => t.id === trackId && t.kind === 'model')) {
+            trackId = s.tracks.find((t) => t.kind === 'model')?.id ?? trackId
+          }
+          if (!trackId) continue
+          const nid = uuid()
+          const copy = withModelDefaults({
+            ...cloneData(m),
+            id: nid,
+            assetId: idMap.get(m.assetId) ?? m.assetId,
+            trackId,
+            start: s.playhead + (m.start - base),
+          })
+          s.modelClips.push(copy)
+          newModelIds.push(nid)
+        }
 
         s.selectedClipIds = newClipIds
         s.selectedTextIds = newTextIds
-        if (newClipIds.length) s.selection = { type: 'clip', id: newClipIds[newClipIds.length - 1] }
+        s.selectedModelIds = newModelIds
+        if (newClipIds.length) s.selection = { type: 'clip', id: newClipIds[newClipIds.length - 1]! }
         else if (newTextIds.length)
-          s.selection = { type: 'text', id: newTextIds[newTextIds.length - 1] }
+          s.selection = { type: 'text', id: newTextIds[newTextIds.length - 1]! }
+        else if (newModelIds.length)
+          s.selection = { type: 'model', id: newModelIds[newModelIds.length - 1]! }
       }),
     )
 
@@ -1138,6 +1611,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   addTrack: (kind) =>
     set(
       produce((s: ProjectStore) => {
+        if (kind === 'model' && !s.settings.threeDEnabled) return
         pushHistory(s)
         const track: Track = {
           id: uuid(),
@@ -1145,15 +1619,22 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           name: nextTrackName(s.tracks, kind),
           muted: false,
           locked: false,
-          height: kind === 'video' ? 72 : 40,
+          height: kind === 'audio' ? 40 : 72,
           blendMode: DEFAULT_BLEND_MODE,
         }
-        if (kind === 'video') {
-          // New video sits above existing video (earlier in list = higher composite)
+        if (kind === 'video' || kind === 'model') {
+          // New visual track sits above existing video/model peers
+          const firstPeer = s.tracks.findIndex((t) => t.kind === kind)
           const firstVideo = s.tracks.findIndex((t) => t.kind === 'video')
           const firstAudio = s.tracks.findIndex((t) => t.kind === 'audio')
           const idx =
-            firstVideo >= 0 ? firstVideo : firstAudio >= 0 ? firstAudio : s.tracks.length
+            firstPeer >= 0
+              ? firstPeer
+              : kind === 'model' && firstVideo >= 0
+                ? firstVideo
+                : firstAudio >= 0
+                  ? firstAudio
+                  : s.tracks.length
           s.tracks.splice(idx, 0, track)
         } else {
           let lastAudio = -1
@@ -1198,7 +1679,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
 export function getSequenceDuration(): number {
   const s = useProjectStore.getState()
-  return projectDuration(s.clips, s.textClips)
+  return projectDuration(s.clips, s.textClips, s.modelClips)
 }
 
 export type { TextAlign, TextVAlign }

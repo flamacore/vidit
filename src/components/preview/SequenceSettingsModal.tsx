@@ -20,6 +20,7 @@ export function SequenceSettingsModal({ open, onClose }: Props) {
   const [width, setWidth] = useState(String(settings.width))
   const [height, setHeight] = useState(String(settings.height))
   const [fps, setFps] = useState(String(settings.fps))
+  const [threeDEnabled, setThreeDEnabled] = useState(settings.threeDEnabled)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -27,8 +28,9 @@ export function SequenceSettingsModal({ open, onClose }: Props) {
     setWidth(String(settings.width))
     setHeight(String(settings.height))
     setFps(String(settings.fps))
+    setThreeDEnabled(settings.threeDEnabled)
     setError('')
-  }, [open, settings.width, settings.height, settings.fps])
+  }, [open, settings.width, settings.height, settings.fps, settings.threeDEnabled])
 
   if (!open) return null
 
@@ -48,7 +50,7 @@ export function SequenceSettingsModal({ open, onClose }: Props) {
       setError('Frame rate must be between 1 and 240 fps.')
       return
     }
-    updateSettings({ width: w, height: h, fps: f })
+    updateSettings({ width: w, height: h, fps: f, threeDEnabled })
     onClose()
   }
 
@@ -136,6 +138,20 @@ export function SequenceSettingsModal({ open, onClose }: Props) {
           >
             Swap orientation
           </button>
+        </div>
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={threeDEnabled}
+              data-testid="sequence-3d-enabled"
+              onChange={(e) => setThreeDEnabled(e.target.checked)}
+            />
+            Enable 3D layers
+          </label>
+          <p className="modal-hint" style={{ margin: '6px 0 0' }}>
+            Adds FBX model tracks, project camera/light controls, and 3D export baking.
+          </p>
         </div>
         {error ? <p style={{ color: 'var(--danger)', margin: '0 0 8px' }}>{error}</p> : null}
         <div className="row" style={{ justifyContent: 'flex-end' }}>

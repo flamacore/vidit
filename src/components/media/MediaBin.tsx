@@ -1,20 +1,37 @@
-import { Film, FolderOpen, Music, Image as ImageIcon } from 'lucide-react'
-import { useCallback, useEffect, useState, type DragEvent, type MouseEvent } from 'react'
+import { Box, Film, FolderOpen, Music, Image as ImageIcon, Trash2 } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { formatDuration } from '../../lib/timelineMath'
 import { importPaths } from '../../lib/importMedia'
+import { forgetPreviewBlobUrl } from '../../lib/previewBlobCache'
 import { useProjectStore } from '../../store/projectStore'
 import type { MediaAsset } from '../../types/project'
 import clsx from 'clsx'
+
+interface CtxMenu {
+  x: number
+  y: number
+  assetIds: string[]
+}
 
 export function MediaBin() {
   const assets = useProjectStore((s) => s.assets)
   const selectedMediaIds = useProjectStore((s) => s.selectedMediaIds)
   const toggleMediaSelect = useProjectStore((s) => s.toggleMediaSelect)
   const setMediaSelection = useProjectStore((s) => s.setMediaSelection)
+  const removeAssets = useProjectStore((s) => s.removeAssets)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [bridgeReady, setBridgeReady] = useState(() => Boolean(window.vidit))
+  const [ctx, setCtx] = useState<CtxMenu | null>(null)
+  const ctxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setBridgeReady(Boolean(window.vidit))
@@ -27,6 +44,23 @@ export function MediaBin() {
     const t = window.setTimeout(() => setError(''), 4000)
     return () => window.clearTimeout(t)
   }, [error])
+
+  useEffect(() => {
+    if (!ctx) return
+    const close = (e: MouseEvent) => {
+      if (ctxRef.current?.contains(e.target as Node)) return
+      setCtx(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCtx(null)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [ctx])
 
   const runImport = useCallback(async (paths: string[]) => {
     if (paths.length === 0) return
@@ -59,10 +93,33 @@ export function MediaBin() {
     }
   }, [runImport])
 
-  const onCardClick = (e: MouseEvent, asset: MediaAsset) => {
+  const deleteIds = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return
+      const state = useProjectStore.getState()
+      for (const id of ids) {
+        const asset = state.assets.find((a) => a.id === id)
+        if (asset?.proxyPath) forgetPreviewBlobUrl(asset.proxyPath)
+        if (asset?.path) forgetPreviewBlobUrl(asset.path)
+      }
+      removeAssets(ids)
+      setCtx(null)
+    },
+    [removeAssets],
+  )
+
+  const onCardClick = (e: ReactMouseEvent, asset: MediaAsset) => {
     if (e.shiftKey) toggleMediaSelect(asset.id, 'range')
     else if (e.metaKey || e.ctrlKey) toggleMediaSelect(asset.id, 'toggle')
     else toggleMediaSelect(asset.id, 'replace')
+  }
+
+  const onCardContextMenu = (e: ReactMouseEvent, asset: MediaAsset) => {
+    e.preventDefault()
+    e.stopPropagation()
+    let ids = selectedMediaIds.includes(asset.id) ? [...selectedMediaIds] : [asset.id]
+    if (!selectedMediaIds.includes(asset.id)) setMediaSelection(ids)
+    setCtx({ x: e.clientX, y: e.clientY, assetIds: ids })
   }
 
   const onDragStart = (e: DragEvent, asset: MediaAsset) => {
@@ -94,6 +151,8 @@ export function MediaBin() {
     await runImport(paths)
   }
 
+  const canDelete = selectedMediaIds.length > 0
+
   return (
     <aside
       className={clsx('panel', dragging && 'drop-overlay')}
@@ -116,16 +175,29 @@ export function MediaBin() {
     >
       <div className="panel-header">
         <span>Media{selectedMediaIds.length > 1 ? ` · ${selectedMediaIds.length}` : ''}</span>
-        <button
-          type="button"
-          className="btn btn-ghost btn-icon"
-          title="Import"
-          data-testid="import-icon"
-          disabled={busy || !bridgeReady}
-          onClick={onImport}
-        >
-          <FolderOpen size={15} />
-        </button>
+        <div className="panel-header-actions">
+          {canDelete ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon"
+              title="Delete selected media"
+              data-testid="delete-media"
+              onClick={() => deleteIds(selectedMediaIds)}
+            >
+              <Trash2 size={15} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            title="Import"
+            data-testid="import-icon"
+            disabled={busy || !bridgeReady}
+            onClick={onImport}
+          >
+            <FolderOpen size={15} />
+          </button>
+        </div>
       </div>
       <div className="panel-body" data-testid="media-bin-body">
         {!bridgeReady ? (
@@ -170,8 +242,9 @@ export function MediaBin() {
                   data-testid="media-card"
                   data-asset-id={asset.id}
                   onClick={(e) => onCardClick(e, asset)}
+                  onContextMenu={(e) => onCardContextMenu(e, asset)}
                   onDragStart={(e) => onDragStart(e, asset)}
-                  title={`${asset.name} — Ctrl/⌘ click to multi-select`}
+                  title={`${asset.name} — right-click to delete · Ctrl/⌘ multi-select`}
                 >
                   <div
                     className="media-thumb"
@@ -186,6 +259,8 @@ export function MediaBin() {
                         <Music size={20} />
                       ) : asset.kind === 'image' ? (
                         <ImageIcon size={20} />
+                      ) : asset.kind === 'model' ? (
+                        <Box size={20} />
                       ) : (
                         <Film size={20} />
                       ))}
@@ -200,6 +275,25 @@ export function MediaBin() {
           </div>
         )}
       </div>
+      {ctx ? (
+        <div
+          ref={ctxRef}
+          className="context-menu"
+          data-testid="media-context-menu"
+          style={{ left: ctx.x, top: ctx.y }}
+          role="menu"
+        >
+          <button
+            type="button"
+            className="context-menu-item danger"
+            role="menuitem"
+            onClick={() => deleteIds(ctx.assetIds)}
+          >
+            <Trash2 size={14} />
+            Delete{ctx.assetIds.length > 1 ? ` (${ctx.assetIds.length})` : ''}
+          </button>
+        </div>
+      ) : null}
     </aside>
   )
 }

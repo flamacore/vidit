@@ -40,6 +40,11 @@ const api = {
     ipcRenderer.on('export:progress', handler)
     return () => ipcRenderer.removeListener('export:progress', handler)
   },
+  createBakeDir: (): Promise<{ dir: string }> => ipcRenderer.invoke('bake:createDir'),
+  writeBakeFrame: (dir: string, index: number, bytes: Uint8Array): Promise<void> =>
+    ipcRenderer.invoke('bake:writeFrame', dir, index, bytes),
+  encodeBakeDir: (dir: string, fps: number): Promise<{ path: string }> =>
+    ipcRenderer.invoke('bake:encode', dir, fps),
   platform: process.platform as NodeJS.Platform,
 }
 

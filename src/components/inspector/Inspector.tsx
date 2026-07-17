@@ -1,5 +1,9 @@
 import { useProjectStore } from '../../store/projectStore'
 import type { ElementTransform } from '../../lib/elementTransform'
+import { formatDuration } from '../../lib/timelineMath'
+import type { ModelClip } from '../../types/project'
+import { ModelMaterialEditor } from './ModelMaterialEditor'
+import { ObjectTransformControls } from './ObjectTransformControls'
 import { TextEditor } from './TextEditor'
 import { TransformControls } from './TransformControls'
 
@@ -7,31 +11,52 @@ export function Inspector() {
   const selection = useProjectStore((s) => s.selection)
   const selectedClipIds = useProjectStore((s) => s.selectedClipIds)
   const selectedTextIds = useProjectStore((s) => s.selectedTextIds)
+  const selectedModelIds = useProjectStore((s) => s.selectedModelIds)
   const clips = useProjectStore((s) => s.clips)
   const textClips = useProjectStore((s) => s.textClips)
+  const modelClips = useProjectStore((s) => s.modelClips)
   const assets = useProjectStore((s) => s.assets)
+  const threeDEnabled = useProjectStore((s) => s.settings.threeDEnabled)
   const updateClip = useProjectStore((s) => s.updateClip)
   const updateClips = useProjectStore((s) => s.updateClips)
   const updateTexts = useProjectStore((s) => s.updateTexts)
+  const updateModel = useProjectStore((s) => s.updateModel)
+  const updateModels = useProjectStore((s) => s.updateModels)
   const addTextClip = useProjectStore((s) => s.addTextClip)
 
   const clip = selection.type === 'clip' ? clips.find((c) => c.id === selection.id) : undefined
   const text = selection.type === 'text' ? textClips.find((t) => t.id === selection.id) : undefined
-  const asset = clip ? assets.find((a) => a.id === clip.assetId) : undefined
+  const model =
+    selection.type === 'model' ? modelClips.find((m) => m.id === selection.id) : undefined
+  const asset = clip
+    ? assets.find((a) => a.id === clip.assetId)
+    : model
+      ? assets.find((a) => a.id === model.assetId)
+      : undefined
   const clipTargets =
     selectedClipIds.length > 0 ? selectedClipIds : clip ? [clip.id] : []
   const textTargets =
     selectedTextIds.length > 0 ? selectedTextIds : text ? [text.id] : []
+  const modelTargets =
+    selectedModelIds.length > 0 ? selectedModelIds : model ? [model.id] : []
   const multiCount =
     selectedClipIds.length > 1
       ? selectedClipIds.length
       : selectedTextIds.length > 1
         ? selectedTextIds.length
-        : 0
+        : selectedModelIds.length > 1
+          ? selectedModelIds.length
+          : 0
 
   const patchClipTransform = (patch: Partial<ElementTransform>) => {
     if (clipTargets.length > 1) updateClips(clipTargets, patch)
     else if (clip) updateClip(clip.id, patch)
+  }
+
+  const patchModel = (patch: Partial<ModelClip>) => {
+    if (!model) return
+    if (modelTargets.length > 1) updateModels(modelTargets, patch)
+    else updateModel(model.id, patch)
   }
 
   return (
@@ -48,7 +73,7 @@ export function Inspector() {
             {multiCount} items selected — editing primary. Drag moves all.
           </p>
         ) : null}
-        {!clip && !text ? (
+        {!clip && !text && !model ? (
           <div className="empty-hint">Select a clip or text on the timeline to edit properties.</div>
         ) : null}
 
@@ -163,6 +188,38 @@ export function Inspector() {
                 else updateTexts([text.id], patch)
               }}
             />
+          </>
+        ) : null}
+
+        {model ? (
+          <>
+            {!threeDEnabled ? (
+              <p style={{ color: 'var(--danger)', fontSize: 11 }}>
+                3D is disabled for this sequence — enable it in sequence settings to preview/export.
+              </p>
+            ) : null}
+            <div className="inspector-section">
+              <h3>3D clip</h3>
+              <div className="field">
+                <label>Name</label>
+                <input type="text" value={asset?.name ?? ''} readOnly />
+              </div>
+              <div className="field">
+                <label>Duration</label>
+                <input type="text" value={formatDuration(model.duration)} readOnly />
+              </div>
+            </div>
+            <ObjectTransformControls value={model} onChange={patchModel} />
+            <TransformControls
+              title={
+                modelTargets.length > 1
+                  ? `Frame transform · ${modelTargets.length}`
+                  : 'Frame transform'
+              }
+              value={model}
+              onChange={patchModel}
+            />
+            <ModelMaterialEditor clip={model} assets={assets} onChange={patchModel} />
           </>
         ) : null}
       </div>

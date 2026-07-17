@@ -1,4 +1,4 @@
-import type { MediaAsset, TextClip, TimelineClip } from '../types/project'
+import type { MediaAsset, ModelClip, TextClip, TimelineClip } from '../types/project'
 
 const PREFIX = 'VIDIT_LAYERS_V1:'
 const STORAGE_KEY = 'vidit.layerClipboard'
@@ -7,6 +7,7 @@ export interface ViditClipboardPayload {
   version: 1
   clips: TimelineClip[]
   texts: TextClip[]
+  models?: ModelClip[]
   /** Asset snapshots needed to rehydrate in another project */
   assets: Array<Omit<MediaAsset, 'thumbnail' | 'waveform' | 'proxyPath' | 'proxyStatus'>>
 }

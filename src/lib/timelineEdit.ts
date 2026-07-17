@@ -1,10 +1,13 @@
 import { v4 as uuid } from 'uuid'
 import type { TimelineClip } from '../types/project'
 
+/** Minimal timed item on a track. */
+export type TrackTimed = { id: string; trackId: string; start: number; duration: number }
+
 /** Nearest cut among clip edges on a track (plus t=0). */
 export function closestCutOnTrack(
   time: number,
-  clips: TimelineClip[],
+  clips: TrackTimed[],
   trackId: string,
   excludeIds: Set<string>,
 ): number {
@@ -25,12 +28,12 @@ export function closestCutOnTrack(
   return Math.max(0, best)
 }
 
-export function findCoveringClip(
-  clips: TimelineClip[],
+export function findCoveringClip<T extends TrackTimed>(
+  clips: T[],
   trackId: string,
   time: number,
   excludeIds: Set<string>,
-): TimelineClip | undefined {
+): T | undefined {
   return clips.find(
     (c) =>
       c.trackId === trackId &&
@@ -60,7 +63,7 @@ export function splitClipAtTime(clips: TimelineClip[], clip: TimelineClip, time:
 
 /** Shift clips on a track that start at/after insertAt by `amount` (ripple insert). */
 export function rippleForward(
-  clips: TimelineClip[],
+  clips: TrackTimed[],
   trackId: string,
   insertAt: number,
   amount: number,
@@ -74,7 +77,7 @@ export function rippleForward(
 }
 
 /** Minimal timeline item for contact-push (clips or text). */
-export type TimedItem = { id: string; trackId: string; start: number; duration: number }
+export type TimedItem = TrackTimed
 
 /**
  * After expanding a clip's right edge to `pusherEnd`, push only items we actually

@@ -4,8 +4,11 @@ import {
   formatExportSizeEstimate,
   suggestVideoBitrateKbps,
 } from '../../../shared/exportBitrate'
+import { bakeTextClip } from '../../lib/bakeTextClip'
 import { buildExportPlan } from '../../lib/renderPlan'
+import { bakeModelClip } from '../../lib/three/bakeModelClip'
 import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
+import type { ModelClip, TextClip } from '../../types/project'
 
 type CrfPreset = 'higher' | 'balanced' | 'smaller'
 
@@ -26,6 +29,9 @@ export function ExportModal() {
   const tracks = useProjectStore((s) => s.tracks)
   const clips = useProjectStore((s) => s.clips)
   const textClips = useProjectStore((s) => s.textClips)
+  const modelClips = useProjectStore((s) => s.modelClips)
+  const camera = useProjectStore((s) => s.camera)
+  const light = useProjectStore((s) => s.light)
 
   const [container, setContainer] = useState<ExportContainer>('mp4')
   const [codec, setCodec] = useState<ExportCodec>('h264')
@@ -90,7 +96,7 @@ export function ExportModal() {
       setError('Export requires the desktop app.')
       return
     }
-    if (clips.length === 0 && textClips.length === 0) {
+    if (clips.length === 0 && textClips.length === 0 && modelClips.length === 0) {
       setError('Add something to the timeline first.')
       return
     }
@@ -113,12 +119,71 @@ export function ExportModal() {
       return
     }
     try {
+      const trackOrder = tracks.map((t) => t.id)
+      const bakedModels: Array<{ clip: ModelClip; path: string }> = []
+      if (settings.threeDEnabled) {
+        const activeModels = modelClips.filter((m) => {
+          const tr = tracks.find((t) => t.id === m.trackId)
+          return tr && tr.kind === 'model' && !tr.muted
+        })
+        for (let i = 0; i < activeModels.length; i++) {
+          const clip = activeModels[i]!
+          const asset = assets.find((a) => a.id === clip.assetId)
+          if (!asset) continue
+          setMessage(`Baking 3D ${i + 1}/${activeModels.length}…`)
+          const path = await bakeModelClip({
+            clip,
+            asset,
+            assets,
+            camera,
+            light,
+            width: settings.width,
+            height: settings.height,
+            fps: settings.fps,
+            onProgress: (pct, msg) => {
+              setPercent(Math.round((i / Math.max(1, activeModels.length)) * 40 + pct * 0.4))
+              setMessage(msg)
+            },
+          })
+          bakedModels.push({ clip, path })
+        }
+      }
+
+      const visualTrackIndices = [
+        ...clips.map((c) => trackOrder.indexOf(c.trackId)),
+        ...bakedModels.map((b) => trackOrder.indexOf(b.clip.trackId)),
+      ].filter((i) => i >= 0)
+
+      const bakedTexts: Array<{ clip: TextClip; path: string }> = []
+      const drawTexts: TextClip[] = []
+      for (const clip of textClips) {
+        const ti = trackOrder.indexOf(clip.trackId)
+        // Text needs bake when a visual layer sits above it (lower track index)
+        const coveredByVisual = visualTrackIndices.some((vi) => vi < ti)
+        if (coveredByVisual) {
+          setMessage('Baking mid-stack text…')
+          const path = await bakeTextClip({
+            clip,
+            width: settings.width,
+            height: settings.height,
+            fps: settings.fps,
+          })
+          bakedTexts.push({ clip, path })
+        } else {
+          drawTexts.push(clip)
+        }
+      }
+
+      setMessage('Encoding…')
       const plan = buildExportPlan({
         settings,
         assets,
         tracks,
         clips,
         textClips,
+        bakedModels,
+        bakedTexts,
+        drawTexts,
         container: codec === 'prores' ? 'mov' : container,
         codec,
         outputPath: out,

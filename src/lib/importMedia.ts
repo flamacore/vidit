@@ -43,7 +43,7 @@ async function buildPreviewProxy(assetId: string, filePath: string): Promise<voi
 export function ensureAssetProxies(assets: MediaAsset[]): void {
   if (!window.vidit?.ensurePreviewProxy) return
   for (const asset of assets) {
-    if (!asset.hasVideo || asset.kind === 'image') continue
+    if (!asset.hasVideo || asset.kind === 'image' || asset.kind === 'model') continue
     if (asset.proxyStatus === 'error') continue
     void buildPreviewProxy(asset.id, asset.path)
   }
@@ -59,13 +59,31 @@ export async function importPaths(paths: string[]): Promise<{ imported: number; 
   for (const filePath of paths) {
     try {
       const probe = await window.vidit.probe(filePath)
+      const name = filePath.split(/[/\\]/).pop() ?? 'media'
+      if (probe.kind === 'model') {
+        assets.push({
+          id: uuid(),
+          path: filePath,
+          name,
+          kind: 'model',
+          duration: probe.duration || 5,
+          width: 0,
+          height: 0,
+          fps: probe.fps || 30,
+          hasAudio: false,
+          hasVideo: false,
+          codec: probe.codec || 'fbx',
+          thumbnail: '',
+          waveform: [],
+        })
+        continue
+      }
       const [thumb, wave] = await Promise.all([
         window.vidit.generateThumbnail(filePath),
         probe.hasAudio
           ? window.vidit.generateWaveform(filePath)
           : Promise.resolve({ path: filePath, peaks: [] as number[] }),
       ])
-      const name = filePath.split(/[/\\]/).pop() ?? 'media'
       const needsProxy = probe.hasVideo && probe.kind !== 'image'
       assets.push({
         id: uuid(),

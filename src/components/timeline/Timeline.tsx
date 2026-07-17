@@ -1,4 +1,5 @@
 import {
+  Box,
   ChevronDown,
   ChevronUp,
   Film,
@@ -22,6 +23,7 @@ import {
 import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
 import { clamp, formatTimecode, pxToTime, timeToPx } from '../../lib/timelineMath'
 import { ClipBlock, TextBlock } from './ClipBlock'
+import { ModelBlock } from './ModelBlock'
 
 const BLEND_GROUPS = blendModeGroups()
 
@@ -59,18 +61,22 @@ export function Timeline() {
   const tracks = useProjectStore((s) => s.tracks)
   const clips = useProjectStore((s) => s.clips)
   const textClips = useProjectStore((s) => s.textClips)
+  const modelClips = useProjectStore((s) => s.modelClips)
   const assets = useProjectStore((s) => s.assets)
+  const threeDEnabled = useProjectStore((s) => s.settings.threeDEnabled)
   const zoom = useProjectStore((s) => s.zoom)
   const snapEnabled = useProjectStore((s) => s.snapEnabled)
   const tool = useProjectStore((s) => s.tool)
   const selectedClipIds = useProjectStore((s) => s.selectedClipIds)
   const selectedTextIds = useProjectStore((s) => s.selectedTextIds)
+  const selectedModelIds = useProjectStore((s) => s.selectedModelIds)
   const setZoom = useProjectStore((s) => s.setZoom)
   const setPlayhead = useProjectStore((s) => s.setPlayhead)
   const setPlaying = useProjectStore((s) => s.setPlaying)
   const toggleSnap = useProjectStore((s) => s.toggleSnap)
   const setTool = useProjectStore((s) => s.setTool)
   const addClipsFromAssets = useProjectStore((s) => s.addClipsFromAssets)
+  const addModelsFromAssets = useProjectStore((s) => s.addModelsFromAssets)
   const toggleTrackMute = useProjectStore((s) => s.toggleTrackMute)
   const setTrackBlendMode = useProjectStore((s) => s.setTrackBlendMode)
   const addTrack = useProjectStore((s) => s.addTrack)
@@ -144,7 +150,9 @@ export function Timeline() {
     }
     if (ids.length === 0 || !scrollRef.current) return
     const start = timeFromClientX(e.clientX)
-    addClipsFromAssets(ids, trackId, start)
+    const track = tracks.find((t) => t.id === trackId)
+    if (track?.kind === 'model') addModelsFromAssets(ids, trackId, start)
+    else addClipsFromAssets(ids, trackId, start)
   }
 
   const onWheel = (e: WheelEvent) => {
@@ -254,6 +262,17 @@ export function Timeline() {
         >
           <AudioLines size={15} />
         </button>
+        {threeDEnabled ? (
+          <button
+            type="button"
+            className="btn btn-icon"
+            title="Add 3D track"
+            data-testid="add-model-track"
+            onClick={() => addTrack('model')}
+          >
+            <Box size={15} />
+          </button>
+        ) : null}
         <span className="timeline-hint">
           Ctrl+wheel zoom · Alt/middle-drag pan · Ctrl/Shift multi-select
         </span>
@@ -385,7 +404,7 @@ export function Timeline() {
                     ) : null}
                   </div>
                 </div>
-                {track.kind === 'video' || track.kind === 'text' ? (
+                {track.kind === 'video' || track.kind === 'text' || track.kind === 'model' ? (
                   <select
                     className="track-blend-select"
                     title="Blend mode (with layers below)"
@@ -440,18 +459,30 @@ export function Timeline() {
                           selected={selectedTextIds.includes(c.id)}
                         />
                       ))
-                  : clips
-                      .filter((c) => c.trackId === track.id)
-                      .map((c) => (
-                        <ClipBlock
-                          key={c.id}
-                          clip={c}
-                          asset={assetMap.get(c.assetId)}
-                          zoom={zoom}
-                          selected={selectedClipIds.includes(c.id)}
-                          kind={track.kind === 'audio' ? 'audio' : 'video'}
-                        />
-                      ))}
+                  : track.kind === 'model'
+                    ? modelClips
+                        .filter((c) => c.trackId === track.id)
+                        .map((c) => (
+                          <ModelBlock
+                            key={c.id}
+                            clip={c}
+                            asset={assetMap.get(c.assetId)}
+                            zoom={zoom}
+                            selected={selectedModelIds.includes(c.id)}
+                          />
+                        ))
+                    : clips
+                        .filter((c) => c.trackId === track.id)
+                        .map((c) => (
+                          <ClipBlock
+                            key={c.id}
+                            clip={c}
+                            asset={assetMap.get(c.assetId)}
+                            zoom={zoom}
+                            selected={selectedClipIds.includes(c.id)}
+                            kind={track.kind === 'audio' ? 'audio' : 'video'}
+                          />
+                        ))}
               </div>
             </div>
           ))}

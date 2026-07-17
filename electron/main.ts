@@ -8,6 +8,9 @@ import {
   generateThumbnail,
   generateWaveform,
   probeMedia,
+  createBakeDir,
+  writeBakeFrame,
+  encodeBakeDir,
 } from './ffmpeg'
 import { handleMediaRequest } from './mediaProtocol'
 import { readProjectFile, writeProjectFile, type SavedProject } from './projectIo'
@@ -92,8 +95,10 @@ app.whenReady().then(() => {
             'jpeg',
             'webp',
             'gif',
+            'fbx',
           ],
         },
+        { name: '3D Models', extensions: ['fbx'] },
       ],
     })
     return result.canceled ? [] : result.filePaths
@@ -142,6 +147,17 @@ app.whenReady().then(() => {
       event.sender.send('export:progress', p)
     })
   })
+
+  ipcMain.handle('bake:createDir', async () => ({ dir: await createBakeDir() }))
+  ipcMain.handle(
+    'bake:writeFrame',
+    async (_e, dir: string, index: number, bytes: Uint8Array | number[]) => {
+      await writeBakeFrame(dir, index, bytes)
+    },
+  )
+  ipcMain.handle('bake:encode', async (_e, dir: string, fps: number) => ({
+    path: await encodeBakeDir(dir, fps),
+  }))
 
   createWindow()
 

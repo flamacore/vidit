@@ -37,6 +37,7 @@ function mergeInsets(a: AlphaInsets, b: AlphaInsets): AlphaInsets {
 export function TransformOverlay() {
   const selectedClipIds = useProjectStore((s) => s.selectedClipIds)
   const selectedTextIds = useProjectStore((s) => s.selectedTextIds)
+  const selectedModelIds = useProjectStore((s) => s.selectedModelIds)
   const selection = useProjectStore((s) => s.selection)
   const transformSelection = useProjectStore((s) => s.transformSelection)
   const beginGesture = useProjectStore((s) => s.beginGesture)
@@ -66,10 +67,16 @@ export function TransformOverlay() {
       : selection.type === 'text'
         ? [selection.id]
         : []
-  const selectionKey = `${clipIds.join(',')}|${textIds.join(',')}`
+  const modelIds =
+    selectedModelIds.length > 0
+      ? selectedModelIds
+      : selection.type === 'model'
+        ? [selection.id]
+        : []
+  const selectionKey = `${clipIds.join(',')}|${textIds.join(',')}|${modelIds.join(',')}`
 
   useLayoutEffect(() => {
-    if (!clipIds.length && !textIds.length) {
+    if (!clipIds.length && !textIds.length && !modelIds.length) {
       setBox(null)
       return
     }
@@ -122,6 +129,16 @@ export function TransformOverlay() {
         const el = host.querySelector(`[data-vidit-layer="text:${id}"]`)
         if (!el) continue
         const b = elementScreenBounds(el, frame, cropInsets(t))
+        if (b) boxes.push(b)
+      }
+
+      for (const id of modelIds) {
+        const m = s.modelClips.find((x) => x.id === id)
+        if (!m) continue
+        if (s.playhead < m.start - 1e-4 || s.playhead >= m.start + m.duration) continue
+        const el = host.querySelector(`[data-vidit-layer="model:${id}"]`)
+        if (!el) continue
+        const b = elementScreenBounds(el, frame, cropInsets(m))
         if (b) boxes.push(b)
       }
 

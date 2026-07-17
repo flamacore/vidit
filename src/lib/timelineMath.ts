@@ -30,9 +30,11 @@ export function clamp(n: number, min: number, max: number): number {
 export function projectDuration(
   clips: { start: number; duration: number }[],
   texts: { start: number; duration: number }[],
+  models: { start: number; duration: number }[] = [],
 ): number {
   let max = 10
   for (const c of clips) max = Math.max(max, c.start + c.duration)
   for (const t of texts) max = Math.max(max, t.start + t.duration)
+  for (const m of models) max = Math.max(max, m.start + m.duration)
   return max
 }

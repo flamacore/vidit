@@ -1,4 +1,4 @@
-export type MediaKind = 'video' | 'audio' | 'image'
+export type MediaKind = 'video' | 'audio' | 'image' | 'model'
 
 export interface ProbeResult {
   path: string

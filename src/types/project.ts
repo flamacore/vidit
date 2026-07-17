@@ -1,7 +1,37 @@
 import type { BlendModeId } from '../../shared/blendModes'
 
 export type { BlendModeId }
-export type TrackKind = 'video' | 'audio' | 'text'
+export type TrackKind = 'video' | 'audio' | 'text' | 'model'
+
+export type TextureChannel = 'r' | 'g' | 'b' | 'a'
+
+export interface TextureSlot {
+  assetId?: string
+  path?: string
+  metallicChannel?: TextureChannel
+  roughnessChannel?: TextureChannel
+  aoChannel?: TextureChannel
+}
+
+export interface PbrMaps {
+  albedo?: TextureSlot
+  normal?: TextureSlot
+  metallicRoughness?: TextureSlot
+  metallic?: TextureSlot
+  roughness?: TextureSlot
+  ao?: TextureSlot
+  emissive?: TextureSlot
+}
+
+export type ModelMaterial =
+  | { mode: 'pbr'; pbr: PbrMaps }
+  | {
+      mode: 'custom'
+      vertexShader?: string
+      fragmentShader: string
+      /** Uniform name → image asset id */
+      textures: Record<string, string>
+    }
 
 export interface MediaAsset {
   id: string
@@ -10,7 +40,7 @@ export interface MediaAsset {
   proxyPath?: string
   proxyStatus?: 'pending' | 'ready' | 'error'
   name: string
-  kind: 'video' | 'audio' | 'image'
+  kind: 'video' | 'audio' | 'image' | 'model'
   duration: number
   width: number
   height: number
@@ -29,7 +59,7 @@ export interface Track {
   muted: boolean
   locked: boolean
   height: number
-  /** Photoshop-style blend with layers below (video/text tracks). */
+  /** Photoshop-style blend with layers below (video/text/model tracks). */
   blendMode: BlendModeId
 }
 
@@ -102,15 +132,68 @@ export interface TextClip {
   bevelDepth: number
 }
 
+export interface ModelClip {
+  id: string
+  trackId: string
+  assetId: string
+  start: number
+  duration: number
+  /** Object transform in world space */
+  posX: number
+  posY: number
+  posZ: number
+  rotX: number
+  rotY: number
+  rotZ: number
+  objScaleX: number
+  objScaleY: number
+  objScaleZ: number
+  /** Plate transform in frame (2D compositor) */
+  x: number
+  y: number
+  scaleX: number
+  scaleY: number
+  rotation: number
+  opacity: number
+  cropL: number
+  cropR: number
+  cropT: number
+  cropB: number
+  castShadows: boolean
+  material: ModelMaterial
+}
+
+export interface ProjectCamera {
+  /** Orbit look-at / target position */
+  posX: number
+  posY: number
+  posZ: number
+  yaw: number
+  pitch: number
+  distance: number
+  fov: number
+}
+
+export interface ProjectLight {
+  intensity: number
+  color: string
+  shadowOpacity: number
+  yaw: number
+  pitch: number
+  castShadows: boolean
+}
+
 export type Selection =
   | { type: 'clip'; id: string }
   | { type: 'text'; id: string }
+  | { type: 'model'; id: string }
   | { type: 'none' }
 
 export interface ProjectSettings {
   width: number
   height: number
   fps: number
+  threeDEnabled: boolean
 }
 
 export interface ProjectState {
@@ -120,9 +203,13 @@ export interface ProjectState {
   tracks: Track[]
   clips: TimelineClip[]
   textClips: TextClip[]
+  modelClips: ModelClip[]
+  camera: ProjectCamera
+  light: ProjectLight
   selection: Selection
   selectedClipIds: string[]
   selectedTextIds: string[]
+  selectedModelIds: string[]
   selectedMediaIds: string[]
   playhead: number
   zoom: number

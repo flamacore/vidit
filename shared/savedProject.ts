@@ -1,16 +1,21 @@
-export const PROJECT_VERSION = 1
+export const PROJECT_VERSION = 2
 
 export interface SavedProject {
   version: number
   name: string
-  settings: { width: number; height: number; fps: number }
+  settings: {
+    width: number
+    height: number
+    fps: number
+    threeDEnabled?: boolean
+  }
   sequenceSized: boolean
   assets: Array<{
     id: string
     path: string
     proxyPath?: string
     name: string
-    kind: 'video' | 'audio' | 'image'
+    kind: 'video' | 'audio' | 'image' | 'model'
     duration: number
     width: number
     height: number
@@ -21,7 +26,7 @@ export interface SavedProject {
   }>
   tracks: Array<{
     id: string
-    kind: 'video' | 'audio' | 'text'
+    kind: 'video' | 'audio' | 'text' | 'model'
     name: string
     muted: boolean
     locked: boolean
@@ -88,6 +93,51 @@ export interface SavedProject {
     bevelEnabled?: boolean
     bevelDepth?: number
   }>
+  modelClips?: Array<{
+    id: string
+    trackId: string
+    assetId: string
+    start: number
+    duration: number
+    posX?: number
+    posY?: number
+    posZ?: number
+    rotX?: number
+    rotY?: number
+    rotZ?: number
+    objScaleX?: number
+    objScaleY?: number
+    objScaleZ?: number
+    x?: number
+    y?: number
+    scaleX?: number
+    scaleY?: number
+    rotation?: number
+    opacity?: number
+    cropL?: number
+    cropR?: number
+    cropT?: number
+    cropB?: number
+    castShadows?: boolean
+    material?: unknown
+  }>
+  camera?: {
+    posX?: number
+    posY?: number
+    posZ?: number
+    yaw: number
+    pitch: number
+    distance: number
+    fov: number
+  }
+  light?: {
+    intensity: number
+    color: string
+    shadowOpacity: number
+    yaw: number
+    pitch: number
+    castShadows: boolean
+  }
   playhead: number
   zoom: number
   previewScale: number

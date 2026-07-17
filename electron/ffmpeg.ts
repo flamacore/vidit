@@ -44,6 +44,21 @@ function run(
 }
 
 export async function probeMedia(filePath: string): Promise<ProbeResult> {
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.fbx') {
+    return {
+      path: filePath,
+      kind: 'model',
+      duration: 5,
+      width: 0,
+      height: 0,
+      fps: 30,
+      hasAudio: false,
+      hasVideo: false,
+      codec: 'fbx',
+    }
+  }
+
   const args = [
     '-v',
     'quiet',
@@ -79,7 +94,6 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
     if (a && b) fps = a / b
   }
 
-  const ext = path.extname(filePath).toLowerCase()
   const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
   let kind: ProbeResult['kind'] = 'video'
   if (imageExts.has(ext)) kind = 'image'
@@ -595,6 +609,43 @@ export async function exportProject(
     message: 'Export complete',
     previewDataUrl: lastPreviewUrl,
   })
+}
+
+export async function createBakeDir(): Promise<string> {
+  const dir = path.join(os.tmpdir(), `vidit-bake-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  await fs.promises.mkdir(dir, { recursive: true })
+  return dir
+}
+
+export async function writeBakeFrame(
+  dir: string,
+  index: number,
+  bytes: Uint8Array | number[],
+): Promise<void> {
+  const name = `frame_${String(index + 1).padStart(5, '0')}.png`
+  const buf = Buffer.from(bytes)
+  await fs.promises.writeFile(path.join(dir, name), buf)
+}
+
+/** Encode PNG sequence to MOV with alpha (PNG codec). */
+export async function encodeBakeDir(dir: string, fps: number): Promise<string> {
+  const out = path.join(dir, 'plate.mov')
+  const pattern = path.join(dir, 'frame_%05d.png').replace(/\\/g, '/')
+  const args = [
+    '-y',
+    '-framerate',
+    String(fps),
+    '-i',
+    pattern,
+    '-c:v',
+    'png',
+    '-pix_fmt',
+    'rgba',
+    out.replace(/\\/g, '/'),
+  ]
+  const { code, stderr } = await run(ffmpegPath, args)
+  if (code !== 0) throw new Error(`Bake encode failed:\n${stderr.slice(-1500)}`)
+  return out
 }
 
 export { ffmpegPath, ffprobePath }
