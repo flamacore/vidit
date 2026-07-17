@@ -5,6 +5,8 @@ import { snapTime, collectSnapTargets } from '../lib/snap'
 import {
   closestCutOnTrack,
   findCoveringClip,
+  pushLeftOnContact,
+  pushRightOnContact,
   rippleForward,
   splitClipAtTime,
 } from '../lib/timelineEdit'
@@ -769,15 +771,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           clip.start = newStart
           clip.duration = effectiveDuration(clip)
 
-          // Extending left into previous clips → push them earlier
-          if (newStart < prevStart) {
-            const grow = prevStart - newStart
-            for (const c of s.clips) {
-              if (c.id === id || c.trackId !== clip.trackId) continue
-              if (c.start + c.duration > newStart + 1e-4 && c.start < prevStart + 1e-4) {
-                c.start = Math.max(0, c.start - grow)
-              }
-            }
+          // Extending left: only push neighbors once the gap is closed
+          if (newStart < prevStart - 1e-4) {
+            pushLeftOnContact(s.clips, clip.trackId, id, prevStart, newStart)
           }
         } else {
           const end = clamp(
@@ -790,23 +786,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           clip.duration = effectiveDuration(clip)
           const newEnd = clip.start + clip.duration
 
-          // Extending right into later clips → push them forward in realtime
+          // Extending right: only push neighbors once the gap is closed
           if (newEnd > prevEnd + 1e-4) {
-            const grow = newEnd - prevEnd
-            for (const c of s.clips) {
-              if (c.id === id || c.trackId !== clip.trackId) continue
-              if (c.start >= prevEnd - 1e-4) {
-                c.start += grow
-              } else if (c.start < newEnd && c.start + c.duration > clip.start) {
-                const push = newEnd - c.start
-                const from = c.start
-                c.start += push
-                for (const o of s.clips) {
-                  if (o.id === id || o.id === c.id || o.trackId !== clip.trackId) continue
-                  if (o.start >= from - 1e-4) o.start += push
-                }
-              }
-            }
+            pushRightOnContact(s.clips, clip.trackId, id, clip.start, newEnd)
           }
         }
       }),
@@ -967,27 +949,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           const newStart = clamp(time, 0, text.start + text.duration - 0.2)
           text.duration -= newStart - text.start
           text.start = newStart
-          if (newStart < prevStart) {
-            const grow = prevStart - newStart
-            for (const t of s.textClips) {
-              if (t.id === id || t.trackId !== text.trackId) continue
-              if (t.start + t.duration > newStart && t.start < prevStart) {
-                t.start = Math.max(0, t.start - grow)
-              }
-            }
+          if (newStart < prevStart - 1e-4) {
+            pushLeftOnContact(s.textClips, text.trackId, id, prevStart, newStart)
           }
         } else {
           text.duration = Math.max(0.2, time - text.start)
           const newEnd = text.start + text.duration
-          if (newEnd > prevEnd) {
-            const grow = newEnd - prevEnd
-            for (const t of s.textClips) {
-              if (t.id === id || t.trackId !== text.trackId) continue
-              if (t.start >= prevEnd - 1e-4) t.start += grow
-              else if (t.start < newEnd && t.start + t.duration > text.start) {
-                t.start += newEnd - t.start
-              }
-            }
+          if (newEnd > prevEnd + 1e-4) {
+            pushRightOnContact(s.textClips, text.trackId, id, text.start, newEnd)
           }
         }
       }),

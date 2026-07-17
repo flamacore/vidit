@@ -73,6 +73,68 @@ export function rippleForward(
   }
 }
 
+/** Minimal timeline item for contact-push (clips or text). */
+export type TimedItem = { id: string; trackId: string; start: number; duration: number }
+
+/**
+ * After expanding a clip's right edge to `pusherEnd`, push only items we actually
+ * touch — gaps absorb the growth. Contact chains through abutting items.
+ */
+export function pushRightOnContact(
+  items: TimedItem[],
+  trackId: string,
+  excludeId: string,
+  clipStart: number,
+  pusherEnd: number,
+): void {
+  const others = items
+    .filter(
+      (c) =>
+        c.id !== excludeId &&
+        c.trackId === trackId &&
+        c.start >= clipStart - 1e-4,
+    )
+    .sort((a, b) => a.start - b.start)
+
+  let edge = pusherEnd
+  for (const c of others) {
+    if (c.start >= edge - 1e-4) break // still a gap — stop
+    const push = edge - c.start
+    if (push > 1e-4) c.start += push
+    edge = c.start + c.duration
+  }
+}
+
+/**
+ * After expanding a clip's left edge to `pusherStart`, push only items we actually
+ * touch on the left — gaps absorb the growth.
+ */
+export function pushLeftOnContact(
+  items: TimedItem[],
+  trackId: string,
+  excludeId: string,
+  prevStart: number,
+  pusherStart: number,
+): void {
+  const others = items
+    .filter(
+      (c) =>
+        c.id !== excludeId &&
+        c.trackId === trackId &&
+        c.start < prevStart + 1e-4,
+    )
+    .sort((a, b) => b.start - a.start)
+
+  let edge = pusherStart
+  for (const c of others) {
+    const cEnd = c.start + c.duration
+    if (cEnd <= edge + 1e-4) break // still a gap — stop
+    const push = cEnd - edge
+    if (push > 1e-4) c.start = Math.max(0, c.start - push)
+    edge = c.start
+  }
+}
+
 export function selectionSpan(
   clips: TimelineClip[],
   ids: string[],
