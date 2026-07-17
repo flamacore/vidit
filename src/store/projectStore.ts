@@ -141,6 +141,8 @@ interface ProjectStore extends ProjectState {
   trimText: (id: string, edge: 'in' | 'out', time: number) => void
   splitAtPlayhead: () => void
   deleteSelection: () => void
+  /** Remove media bin assets and all timeline clips that use them. */
+  removeAssets: (ids?: string[]) => void
   copySelection: () => Promise<void>
   pasteClipboard: () => Promise<void>
   cutSelection: () => Promise<void>
@@ -1007,6 +1009,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         s.selection = { type: 'none' }
         s.selectedClipIds = []
         s.selectedTextIds = []
+      }),
+    ),
+
+  removeAssets: (ids) =>
+    set(
+      produce((s: ProjectStore) => {
+        const target = ids?.length ? ids : [...s.selectedMediaIds]
+        if (target.length === 0) return
+        const removeSet = new Set(target)
+        if (!s.assets.some((a) => removeSet.has(a.id))) return
+        pushHistory(s)
+        s.assets = s.assets.filter((a) => !removeSet.has(a.id))
+        s.clips = s.clips.filter((c) => !removeSet.has(c.assetId))
+        s.selectedMediaIds = s.selectedMediaIds.filter((id) => !removeSet.has(id))
+        const sel = s.selection
+        if (sel.type === 'clip' && !s.clips.some((c) => c.id === sel.id)) {
+          s.selection = { type: 'none' }
+        }
+        s.selectedClipIds = s.selectedClipIds.filter((id) => s.clips.some((c) => c.id === id))
       }),
     ),
 

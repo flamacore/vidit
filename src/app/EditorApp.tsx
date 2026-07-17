@@ -38,9 +38,15 @@ export function EditorApp() {
         case 'redo':
           s.redo()
           break
-        case 'delete':
-          s.deleteSelection()
+        case 'delete': {
+          const hasTimeline =
+            s.selectedClipIds.length > 0 ||
+            s.selectedTextIds.length > 0 ||
+            s.selection.type !== 'none'
+          if (hasTimeline) s.deleteSelection()
+          else if (s.selectedMediaIds.length > 0) s.removeAssets()
           break
+        }
         case 'copy':
           void s.copySelection()
           break
