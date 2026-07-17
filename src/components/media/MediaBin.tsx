@@ -117,14 +117,13 @@ export function MediaBin() {
   const onCardContextMenu = (e: ReactMouseEvent, asset: MediaAsset) => {
     e.preventDefault()
     e.stopPropagation()
-    let ids = selectedMediaIds.includes(asset.id) ? [...selectedMediaIds] : [asset.id]
+    const ids = selectedMediaIds.includes(asset.id) ? [...selectedMediaIds] : [asset.id]
     if (!selectedMediaIds.includes(asset.id)) setMediaSelection(ids)
     setCtx({ x: e.clientX, y: e.clientY, assetIds: ids })
   }
 
   const onDragStart = (e: DragEvent, asset: MediaAsset) => {
     let ids = selectedMediaIds.includes(asset.id) ? [...selectedMediaIds] : [asset.id]
-    // Preserve bin order
     const order = new Map(assets.map((a, i) => [a.id, i]))
     ids = ids.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
     if (!selectedMediaIds.includes(asset.id)) setMediaSelection(ids)
