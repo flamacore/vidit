@@ -454,6 +454,63 @@ textarea,
   padding: 4px 6px;
 }
 
+.master-level-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 14px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  user-select: none;
+}
+
+.master-level-label {
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.master-level-track {
+  position: relative;
+  width: 88px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.master-level-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, #2f8f6e 0%, var(--accent) 70%, #e6c35c 90%, var(--danger) 100%);
+  transition: transform 0.05s linear;
+}
+
+.master-level-fill.hot {
+  filter: brightness(1.15);
+}
+
+.master-level-peak {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #f0f2f5;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.master-level-db {
+  min-width: 28px;
+  text-align: right;
+  color: var(--text-muted);
+}
+
 .preview-placeholder {
   position: absolute;
   inset: 0;

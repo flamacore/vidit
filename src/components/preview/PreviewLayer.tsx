@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { transformStyle, withTransform } from '../../lib/elementTransform'
+import {
+  attachPreviewMedia,
+  detachPreviewMedia,
+  setPreviewAudioSink,
+  setPreviewMasterVolume,
+} from '../../lib/previewAudioBus'
 import { getPreviewBlobUrl, peekPreviewBlobUrl } from '../../lib/previewBlobCache'
 import type { MediaAsset, TimelineClip } from '../../types/project'
 
@@ -57,6 +63,7 @@ export function PreviewLayer({
   statusRef.current = onStatus
 
   const mediaPath = asset.proxyPath || asset.path
+  const audioOnly = asset.hasAudio && !asset.hasVideo && asset.kind !== 'image'
   const waitingProxy = asset.hasVideo && asset.kind !== 'image' && !asset.proxyPath
   const proxyFailed = asset.proxyStatus === 'error'
   const [src, setSrc] = useState(() =>
@@ -253,18 +260,29 @@ export function PreviewLayer({
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
-    video.muted = !playAudio || !active
-    video.volume = Math.min(1, Math.max(0, clip.volume))
-    const el = video as HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }
-    if (audioSinkId && el.setSinkId) {
-      void el.setSinkId(audioSinkId).catch(() => undefined)
+    const vol = Math.min(1, Math.max(0, clip.volume))
+    void setPreviewAudioSink(audioSinkId)
+    if (playAudio && active && asset.hasAudio) {
+      void attachPreviewMedia(video, vol)
+    } else {
+      detachPreviewMedia(video)
+      video.muted = true
+      video.volume = 0
     }
-  }, [playAudio, active, clip.volume, audioSinkId, src])
+    return () => {
+      detachPreviewMedia(video)
+    }
+  }, [playAudio, active, clip.volume, audioSinkId, src, asset.hasAudio])
+
+  useEffect(() => {
+    if (playAudio && active) setPreviewMasterVolume(Math.min(1, Math.max(0, clip.volume)))
+  }, [clip.volume, playAudio, active])
 
   const slotStyle: CSSProperties = {
     zIndex,
-    opacity: vis,
+    opacity: audioOnly ? 0 : vis,
     mixBlendMode: mixBlendMode as CSSProperties['mixBlendMode'],
+    pointerEvents: audioOnly ? 'none' : undefined,
   }
 
   if (asset.kind === 'image') {
@@ -300,14 +318,21 @@ export function PreviewLayer({
         </div>
       ) : null}
       {src && !waitingProxy ? (
-        <div className="preview-layer-xform" style={{ left: xform.left, top: xform.top, transform: xform.transform }}>
+        <div
+          className="preview-layer-xform"
+          style={
+            audioOnly
+              ? { position: 'absolute', width: 0, height: 0, overflow: 'hidden' }
+              : { left: xform.left, top: xform.top, transform: xform.transform }
+          }
+        >
           <video
             ref={videoRef}
             src={src}
             className="preview-layer-media"
             data-vidit-layer={`clip:${clip.id}`}
-            style={{ clipPath: xform.clipPath }}
-            muted={!playAudio}
+            style={audioOnly ? { width: 1, height: 1 } : { clipPath: xform.clipPath }}
+            muted={!(playAudio && active && asset.hasAudio)}
             playsInline
             preload="auto"
             disablePictureInPicture

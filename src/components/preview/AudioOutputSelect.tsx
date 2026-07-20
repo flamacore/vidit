@@ -5,6 +5,7 @@ import {
   listAudioOutputDevices,
   setStoredAudioOutputId,
 } from '../../lib/audioOutput'
+import { setPreviewAudioSink } from '../../lib/previewAudioBus'
 
 interface Props {
   value: string
@@ -30,6 +31,7 @@ export function AudioOutputSelect({ value, onChange }: Props) {
         onChange={(e) => {
           const id = e.target.value
           setStoredAudioOutputId(id)
+          void setPreviewAudioSink(id)
           onChange(id)
         }}
       >

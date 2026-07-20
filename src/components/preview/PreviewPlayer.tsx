@@ -11,7 +11,9 @@ import {
 } from '../../lib/textStyle'
 import { getSequenceDuration, useProjectStore } from '../../store/projectStore'
 import type { MediaAsset, ModelClip, TextClip, TimelineClip, Track } from '../../types/project'
+import { resumePreviewAudio } from '../../lib/previewAudioBus'
 import { AudioOutputSelect, useAudioOutputId } from './AudioOutputSelect'
+import { MasterLevelMeter } from './MasterLevelMeter'
 import { PreviewLayer } from './PreviewLayer'
 import { PreviewModelLayer } from './PreviewModelLayer'
 import { SceneChrome } from './SceneChrome'
@@ -45,7 +47,8 @@ function videoLayers(
     .map((clip) => {
       const asset = assetMap.get(clip.assetId)
       if (!asset) return null
-      if (!asset.hasVideo && asset.kind !== 'image') return null
+      // Include audio-only so preview bus / meter can hear A-track clips
+      if (!asset.hasVideo && asset.kind !== 'image' && !asset.hasAudio) return null
       const z = trackZ(tracks, clip.trackId)
       if (z <= 0) return null
       return { clip, asset, z }
@@ -365,7 +368,11 @@ export function PreviewPlayer() {
           className="btn btn-icon"
           title="Play/Pause"
           data-testid="play-pause"
-          onClick={() => setPlaying(!isPlaying)}
+          onClick={() => {
+            const next = !isPlaying
+            if (next) void resumePreviewAudio()
+            setPlaying(next)
+          }}
         >
           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
         </button>
@@ -383,6 +390,7 @@ export function PreviewPlayer() {
         <div className="timecode" data-testid="timecode">
           {formatTimecode(playhead)} / {formatTimecode(duration)}
         </div>
+        <MasterLevelMeter />
         <AudioOutputSelect value={audioSinkId} onChange={setAudioSinkId} />
       </div>
       <SequenceSettingsModal open={sequenceOpen} onClose={() => setSequenceOpen(false)} />

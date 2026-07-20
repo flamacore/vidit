@@ -1,7 +1,7 @@
 {
   "name": "vidit",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.2.1",
   "description": "Vidit — desktop video editor",
   "author": "Vidit",
   "type": "module",
