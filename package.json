@@ -1,7 +1,7 @@
 {
   "name": "vidit",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Vidit — desktop video editor",
   "author": "Vidit",
   "type": "module",
@@ -62,6 +62,16 @@
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**",
       "**/node_modules/ffprobe-static/**"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/ffmpeg-static/ffmpeg.exe",
+        "to": "ffmpeg/ffmpeg.exe"
+      },
+      {
+        "from": "node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe",
+        "to": "ffmpeg/ffprobe.exe"
+      }
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {

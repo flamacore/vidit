@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { app } from 'electron'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,8 +17,46 @@ import type {
 } from './types'
 
 const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static') as string
-const ffprobePath = (require('ffprobe-static') as { path: string }).path
+
+/** Binaries cannot be spawned from inside app.asar — prefer unpacked / extraResources. */
+function resolveBinary(candidate: string | null | undefined, label: string): string {
+  const tried: string[] = []
+  const consider = (p: string | null | undefined) => {
+    if (!p) return null
+    const variants = [
+      p,
+      // Classic Electron packaging fix
+      p.replace(/app\.asar(?!\.unpacked)/g, 'app.asar.unpacked'),
+    ]
+    for (const v of variants) {
+      if (!v || tried.includes(v)) continue
+      tried.push(v)
+      if (fs.existsSync(v)) return v
+    }
+    return null
+  }
+
+  // Packaged install: binaries copied next to resources via extraResources
+  if (app.isPackaged) {
+    const exe = process.platform === 'win32' ? `${label}.exe` : label
+    const fromResources = path.join(process.resourcesPath, 'ffmpeg', exe)
+    const hit = consider(fromResources)
+    if (hit) return hit
+  }
+
+  const hit = consider(candidate)
+  if (hit) return hit
+
+  throw new Error(
+    `${label} binary not found. Looked in:\n${tried.map((t) => `  - ${t}`).join('\n')}`,
+  )
+}
+
+const ffmpegPath = resolveBinary(require('ffmpeg-static') as string, 'ffmpeg')
+const ffprobePath = resolveBinary(
+  (require('ffprobe-static') as { path: string }).path,
+  'ffprobe',
+)
 
 function run(
   bin: string,
